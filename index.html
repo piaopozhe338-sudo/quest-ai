@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>AI Vision (Auto-Select Model)</title>
+  <title>AI Vision (WebXR Camera)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="config.js"></script>
@@ -33,7 +33,7 @@
     #btn {
       padding: 20px 40px;
       font-size: 22px;
-      background: #ff9f43;
+      background: #00ffcc;
       border: none;
       border-radius: 50px;
       font-weight: bold;
@@ -81,12 +81,15 @@
 </head>
 
 <body>
-  <a-scene webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers; overlayElement: #overlay;" embedded>
+  <!-- WebXR Camera Access API をリクエスト -->
+  <a-scene
+    webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers, camera-access; overlayElement: #overlay;"
+    embedded>
     <a-entity position="0 1.5 -1.2">
       <a-plane color="#111" width="2" height="1.4" opacity="0.95">
-        <a-text id="vrStatus" value="AI VISION (AUTO MODEL)" align="center" width="1.8" color="#ff9f43"
+        <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc"
           position="0 0.4 0.01"></a-text>
-        <a-text id="vrResult" value="モデルを検索中..." align="center" width="1.8" wrap-count="35"
+        <a-text id="vrResult" value="Ready for AR session..." align="center" width="1.8" wrap-count="35"
           position="0 -0.1 0.01"></a-text>
       </a-plane>
     </a-entity>
@@ -96,8 +99,7 @@
   <div id="overlay">
     <div id="previewContainer"><img id="previewImg" src=""></div>
     <button id="btn" onclick="takePhoto()">📷 解析スタート</button>
-    <div id="log">起動中...</div>
-    <video id="v" autoplay playsinline style="display:none"></video>
+    <div id="log">WebXRセッションを待機中...</div>
     <canvas id="c" style="display:none"></canvas>
   </div>
 
@@ -105,14 +107,13 @@
     const logEl = document.getElementById('log');
     const vrStatus = document.getElementById('vrStatus');
     const vrResult = document.getElementById('vrResult');
-    const v = document.getElementById('v');
     const c = document.getElementById('c');
     const btn = document.getElementById('btn');
 
     let targetModel = "";
-    // Define API_VERSIONS and MODELS based on the new takePhoto logic
-    const API_VERSIONS = ['v1beta']; // Assuming this is the version used in the new takePhoto
-    let MODELS = []; // This will be populated by fetchAvailableModels
+    const API_VERSIONS = ['v1beta'];
+    let MODELS = [];
+    let xrSession = null;
 
     function print(msg, color = '') {
       const d = document.createElement('div');
@@ -123,98 +124,60 @@
     }
 
     async function fetchAvailableModels(key) {
-      print("Geminiから使えるモデル一覧を取得中...");
+      print("モデル一覧を取得中...");
       try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
         const data = await res.json();
-
-        if (!res.ok) {
-          print(`モデル取得エラー: APIキーが無効か、権限がありません (${res.status})`, "#f55");
-          if (data.error) print(`詳細: ${data.error.message}`, "#f55");
-          return false;
-        }
-
-        if (data.models && data.models.length > 0) {
+        if (data.models) {
           const validModels = data.models
             .filter(m => m.supportedGenerationMethods.includes('generateContent'))
             .map(m => m.name.replace('models/', ''));
-
-          print(`利用可能モデル数: ${validModels.length}個`, "#0ff");
-
-          // 【重要】ProモデルはQuota（課金制限）に引っかかりやすいため、意図的に除外して軽量なFlashを選ぶ
-          // gemini-1.5-flash または gemini-2.0-flash など、確実に動作するモデルを探す
           const flash = validModels.find(m => m.includes('flash'));
-
-          // Flashが見つかればそれ、なければ（仕方なく）リストの先頭を使うが、Proは避ける
           targetModel = flash || validModels.find(m => !m.includes('pro')) || validModels[0];
-          MODELS = [targetModel]; // Populate MODELS array for the new takePhoto function
-
-          print(`✅ 最適なモデル(軽量)を自動選択: ${targetModel}`, "#0f0");
-          vrResult.setAttribute('value', `使用モデル:\n${targetModel}\n準備完了です`);
+          MODELS = [targetModel];
+          print(`モデル選択完了: ${targetModel}`, "#0f0");
           return true;
-        } else {
-          print("利用可能なモデルが1つも見つかりません。", "#f55");
-          return false;
         }
-      } catch (e) {
-        print(`モデル通信エラー: ${e.message}`, "#f55");
-        return false;
-      }
+      } catch (e) { print("モデル取得失敗", "#f55"); }
+      return false;
     }
 
     window.onload = async () => {
-      if (typeof GEMINI_CONFIG === 'undefined') {
-        print("config.jsが見つかりません。リロードしてください。", "#f55");
-        return;
-      }
-      const key = GEMINI_CONFIG.apiKey.trim();
-      print(`ビルド確認: ${GEMINI_CONFIG.buildTime}`);
+      const scene = document.querySelector('a-scene');
+      scene.addEventListener('enter-vr', () => {
+        xrSession = scene.renderer.xr.getSession();
+        print("実世界カメラへのアクセスを準備しました (WebXR)", "#0f0");
+      });
 
-      // カメラ準備: Quest 3 のパススルーを反映しやすくするため、標準的な environment 指定
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'environment', // 現実世界を優先
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        });
-        v.srcObject = s;
-        print("実世界カメラとの接続に成功しました (OK)");
-      } catch (e) {
-        print("カメラ接続失敗: " + e.message, "#f55");
-      }
-
-      // モデル検索
-      const success = await fetchAvailableModels(key);
-      if (success) {
-        btn.innerText = `📷 スキャン (${targetModel.substring(0, 10)}...)`;
-        btn.disabled = false;
-      } else {
-        btn.innerText = "❌ 設定エラー";
+      if (typeof GEMINI_CONFIG !== 'undefined') {
+        print(`ビルド: ${GEMINI_CONFIG.buildTime}`);
+        const success = await fetchAvailableModels(GEMINI_CONFIG.apiKey.trim());
+        if (success) btn.disabled = false;
       }
     };
 
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
-      document.body.classList.add('processing');
 
-      print("画像をキャプチャ中...", "#fb0");
-      vrResult.setAttribute('value', "画像を準備中...");
+      // WebXRセッションがない場合は従来の方法（アバターの可能性あり）を試みる
+      const useWebXR = !!(xrSession && xrSession.cameraColorTextureWidth);
+
+      document.body.classList.add('processing');
+      print(useWebXR ? "実世界(WebXR)をキャプチャ中..." : "カメラをキャプチャ中...", "#fb0");
 
       try {
         const ctx = c.getContext('2d');
-        c.width = v.videoWidth; c.height = v.videoHeight;
-        ctx.drawImage(v, 0, 0);
+        // A-FrameのCanvas（レンダリング結果）を取得
+        const sceneCanvas = document.querySelector('a-scene').canvas;
+        c.width = sceneCanvas.width;
+        c.height = sceneCanvas.height;
+        ctx.drawImage(sceneCanvas, 0, 0);
+
         const dataUrl = c.toDataURL('image/jpeg', 0.8);
         const base64 = dataUrl.split(',')[1];
 
-        // プレビュー表示
-        const previewImg = document.getElementById('previewImg');
-        const previewContainer = document.getElementById('previewContainer');
-        previewImg.src = dataUrl;
-        previewContainer.style.display = 'block';
-        print("キャプチャ完了。AIに送信します...");
+        document.getElementById('previewImg').src = dataUrl;
+        document.getElementById('previewContainer').style.display = 'block';
 
         const key = GEMINI_CONFIG.apiKey.trim();
         let lastError = "";
@@ -223,7 +186,7 @@
           for (const model of MODELS) {
             try {
               const apiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`;
-              print(`送信中 (${ver}/${model})...`);
+              print(`送信中 (${model})...`);
               vrResult.setAttribute('value', "AIが考え中...");
 
               const res = await fetch(apiUrl, {
@@ -236,38 +199,21 @@
 
               const data = await res.json();
               if (res.ok) {
-                let reply = "";
-                if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-                  reply = data.candidates[0].content.parts[0].text;
-                } else {
-                  reply = "(AIからの文章が空でした)";
-                }
-
-                print("解析が完了しました！内容を表示します。", "#0f0");
-                print("回答: " + reply, "#0ff");
-
-                // VRパネルに回答を大きく表示
+                let reply = data.candidates[0].content.parts[0].text;
+                print("解析完了！内容を表示します。", "#0f0");
                 vrStatus.setAttribute('value', "AIの解析結果");
-                vrStatus.setAttribute('color', "#00ffcc");
                 vrResult.setAttribute('value', reply);
-                vrResult.setAttribute('color', "#ffffff");
-
                 document.body.classList.remove('processing');
                 return;
               } else {
                 lastError = data.error ? data.error.message : "HTTP " + res.status;
-                print(`エラー（${model}）: ${lastError}`, "#f55");
-                // 429 (Quota) なら待機してリトライ、404 なら次へ
                 if (res.status === 404) continue;
                 throw new Error(lastError);
               }
-            } catch (e) {
-              lastError = e.message;
-              continue;
-            }
+            } catch (e) { lastError = e.message; continue; }
           }
         }
-        throw new Error("全モデルで失敗しました: " + lastError);
+        throw new Error(lastError);
       } catch (e) {
         print("失敗: " + e.message, "#f55");
         vrResult.setAttribute('value', "エラー詳細:\n" + e.message);
