@@ -126,6 +126,52 @@
       height: 100%;
       object-fit: cover;
     }
+
+    .product-info {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 15px;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 15px;
+      border-radius: 8px;
+    }
+
+    .product-img-placeholder {
+      font-size: 60px;
+      margin: 10px 0;
+      text-align: center;
+    }
+
+    .shop-links {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .shop-btn {
+      padding: 10px 15px;
+      color: #fff;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 14px;
+      text-align: center;
+      text-decoration: none;
+      flex: 1;
+      display: block;
+    }
+
+    .btn-amazon {
+      background: #ff9900;
+      color: #000;
+      text-shadow: none;
+    }
+
+    .btn-rakuten {
+      background: #bf0000;
+    }
   </style>
 </head>
 
@@ -240,24 +286,72 @@
       vrResult.setAttribute('value', "AIに接続しています...");
 
       try {
+        const promptText = `
+あなたは優秀な画像解析アシスタントです。ユーザーがアップロードした画像を見て、写っているメインの物体・商品を特定してください。
+以下の厳密なJSON形式で出力してください。Markdownのコードブロック構文(\`\`\`json)等は一切含めず、純粋なJSON文字列だけを返してください。
+
+{
+  "description": "画像の簡単な説明（日本語2〜3行）",
+  "isProduct": true/false (特定の市販商品やガジェット、ブランド品などの場合はtrue),
+  "productName": "商品名（isProductがtrueの場合のみ。なるべく正確なモデル名や一般的な検索キーワードになる名前）"
+}
+`;
+
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_CONFIG.apiKey.trim()}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: "これ何？日本語1行で。写っている実世界のものを教えて。" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+            // 安定のため、systemInstructionではなく通常のプロンプトとして送信
+            contents: [{ parts: [{ text: promptText }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
           })
         });
 
         const data = await res.json();
         if (res.ok) {
-          const reply = data.candidates[0].content.parts[0].text;
-          print("解析完了！回答を表示します。", "#0f0");
-          print(`🤖回答: ${reply}`, "#0f0");
+          const replyText = data.candidates[0].content.parts[0].text.trim();
 
-          // a-text (3D) は日本語対応フォントが無いと見えなくなるため、
-          // DOM (2D画面) に専用の枠を出して確実に表示する
+          let aiResult = {};
+          try {
+            // もしGeminiがMarkdownブロックで囲んできたら除去
+            const cleanedText = replyText.replace(/```json/gi, '').replace(/```/g, '').trim();
+            aiResult = JSON.parse(cleanedText);
+          } catch (e) {
+            console.error("JSONパースエラー:", e, "生データ:", replyText);
+            // パース失敗時のフォールバック
+            aiResult = {
+              description: replyText,
+              isProduct: false,
+              productName: ""
+            };
+          }
+
+          print("解析完了！回答を表示します。", "#0f0");
+          print(`💬 ${aiResult.description.substring(0, 20)}...`, "#0f0");
+
           answerBox.style.display = 'block';
-          answerBox.innerText = `【AIの解析結果】\n${reply}`;
+
+          let htmlContent = `<strong>【AIの解析結果】</strong><br><br>${aiResult.description.replace(/\\n/g, '<br>')}`;
+
+          if (aiResult.isProduct && aiResult.productName) {
+            const encodedName = encodeURIComponent(aiResult.productName);
+            const amazonUrl = `https://www.amazon.co.jp/s?k=${encodedName}`;
+            const rakutenUrl = `https://search.rakuten.co.jp/search/mall/${encodedName}/`;
+
+            htmlContent += `
+              <hr style="border-color:#555; margin: 15px 0;">
+              <div class="product-info">
+                <strong>🛒 認識された商品:</strong>
+                <div style="font-size: 1.1em; color: #0f0; margin-bottom: 5px;">${aiResult.productName}</div>
+                <div class="product-img-placeholder">📦</div>
+                <div class="shop-links">
+                  <a href="${amazonUrl}" target="_blank" class="shop-btn btn-amazon">Amazonで探す</a>
+                  <a href="${rakutenUrl}" target="_blank" class="shop-btn btn-rakuten">楽天で探す</a>
+                </div>
+              </div>
+            `;
+          }
+
+          answerBox.innerHTML = htmlContent;
 
           vrStatus.setAttribute('value', "AIの解析結果");
           vrResult.setAttribute('value', "(画面の回答をご覧ください)");
