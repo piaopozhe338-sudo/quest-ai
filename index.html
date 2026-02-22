@@ -119,6 +119,13 @@
     const resultText = document.getElementById('resultText');
 
     async function initCamera() {
+      // デバッグ情報：APIキーが正しく埋め込まれているか確認（最初の3文字だけ表示）
+      const keyStatus = (GEMINI_API_KEY.startsWith('__'))
+        ? "未注入（Actionsの設定を確認してください）"
+        : "注入済み (" + GEMINI_API_KEY.substring(0, 3) + "...)";
+      console.log("API Key Status:", keyStatus);
+      resultText.setAttribute('value', "システム準備完了\nAPI Key: " + keyStatus);
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1280 } },
@@ -170,12 +177,14 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody)
+        }).catch(fetchErr => {
+          throw new Error("ネットワークエラー: " + fetchErr.message);
         });
 
         const data = await response.json();
 
         if (!response.ok) {
-          const errorMsg = data.error ? data.error.message : response.statusText;
+          const errorMsg = data.error ? data.error.message : (data.message || response.statusText);
           throw new Error(`API ${response.status}: ${errorMsg}`);
         }
 
