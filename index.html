@@ -138,6 +138,7 @@
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
+        // v1beta で 404 が出たため、安定版の v1 エンドポイントを使用
         const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${window.GEMINI_CONFIG.apiKey}`;
         const response = await fetch(url, {
           method: 'POST',
