@@ -1,12 +1,24 @@
-name: Deploy to GitHub Pages with API Key
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches:
-      - main  # あなたのメインブランチ名に合わせてください（masterの場合はmasterに変更）
+    branches: ["main"] # masterの場合は master に書き換えてください
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,9 +29,14 @@ jobs:
           # index.html 内のプレースホルダーを GitHub Secrets の値に書き換えます
           sed -i "s/__API_KEY_PLACEHOLDER__/${{ secrets.GEMINI_API_KEY }}/g" index.html
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          publish_branch: gh-pages # 公開専用のブランチにデプロイ
+          path: '.' # 全ファイルをアップロード
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
