@@ -194,8 +194,14 @@
 
         const data = await res.json();
         if (res.ok) {
-          print("✅ 解析成功！", "#0f0");
-          vrResult.setAttribute('value', data.candidates[0].content.parts[0].text);
+          const reply = data.candidates[0].content.parts[0].text;
+          print("解析成功", "#0f0");
+
+          // VRパネルに回答を大きく表示
+          vrStatus.setAttribute('value', "AIの解析結果");
+          vrStatus.setAttribute('color', "#0f0");
+          vrResult.setAttribute('value', reply);
+          vrResult.setAttribute('color', "#fff");
         } else {
           const errMsg = data.error ? data.error.message : "HTTP " + res.status;
           throw new Error(errMsg);
