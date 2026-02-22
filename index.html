@@ -319,8 +319,7 @@
         tempImageBase64 = captureVRImage();
 
         if (!tempImageBase64) {
-          print("カメラのキャプチャに失敗しました。写真を選択してください。", "#f55");
-          return;
+          print("⚠️ VRキャプチャ制限中: 音声のみ記録します。しゃべり終わったら「写真を選択」してください。", "#fb0");
         }
 
         recognition.start();
@@ -427,7 +426,12 @@
         document.getElementById('previewImg').src = dataUrl;
         document.getElementById('previewContainer').style.display = 'block';
 
-        print(`ファイル画像で解析を開始します... (${file.name})`, "#fb0");
+        if (recordedText) {
+          print(`写真と録音した質問を送信します... (${file.name})`, "#fb0");
+        } else {
+          print(`ファイル画像で解析を開始します... (${file.name})`, "#fb0");
+        }
+
         await sendToAI(base64);
         fileInput.value = ""; // リセット
       };
