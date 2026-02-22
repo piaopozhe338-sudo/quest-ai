@@ -292,8 +292,28 @@
         resetMicBtn();
       };
 
+      // ====== 追加: デバッグおよび状態把握用のイベント ======
+      recognition.onaudiostart = function () {
+        print("💡 マイクの音声入力を検知開始...", "#aaa");
+      };
+
+      recognition.onsoundstart = function () {
+        print("💡 何らかの音を検知しました", "#aaa");
+      };
+
+      recognition.onspeechstart = function () {
+        print("💡 ユーザーの発話を検知しました！", "#aaa");
+      };
+
+      recognition.onnomatch = function () {
+        print("⚠️ 音声は拾いましたが、言葉として認識できませんでした", "#fb0");
+      };
+
       recognition.onend = function () {
         resetMicBtn();
+        let duration = Date.now() - recordStartTime;
+        print(`💡 録音終了 (録音時間: ${Math.round(duration / 1000)}秒)`, "#aaa");
+
         if (recordedText && tempImageBase64) {
           vrResult.setAttribute('value', "質問と画像を送信中...");
           print(`🎤 送信した質問: "${recordedText}"`, "#0f0");
@@ -304,11 +324,13 @@
           // 停止時にもう一度ログに出してあげる
           print(`👉 次に写真を送ると「${recordedText}」への回答が来ます`, "#0ff");
         } else {
-          print("音声が認識されませんでした。もう一度試すか、写真を選択してください。", "#fb0");
+          print(`⚠️ 音声入力が空でした。Questのマイクの設定（ミュート等）を確認してください。`, "#fb0");
           vrResult.setAttribute('value', "音声入力なし");
         }
       };
     }
+
+    let recordStartTime = 0;
 
     function resetMicBtn() {
       isRecording = false;
@@ -340,7 +362,13 @@
           print("⚠️ VRキャプチャ制限中: 音声のみ記録します。しゃべり終わったら「写真を選択」してください。", "#fb0");
         }
 
-        recognition.start();
+        recordStartTime = Date.now();
+        try {
+          recognition.start();
+        } catch (e) {
+          print(`⚠️ 録音開始エラー: ${e.message}`, "#f55");
+          resetMicBtn();
+        }
       }
     }
 
