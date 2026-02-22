@@ -331,23 +331,42 @@
     function captureVRImage() {
       answerBox.style.display = 'none'; // 新しいキャプチャで一旦隠す
       const renderer = sceneEl.renderer;
-      if (!renderer) return null;
+      if (!renderer) {
+        print("レンダラー未準備", "#f55");
+        return null;
+      }
 
       const canvas = renderer.domElement;
-      if (!canvas || canvas.width <= 1 || canvas.height <= 1) return null;
+      // 幅・高さの判定を緩和（Quest等で0や1になることがあるため、取得できる範囲で強制描画を試みる）
+      if (!canvas) {
+        print("Canvasが取得できません", "#f55");
+        return null;
+      }
 
-      const ctx = c.getContext('2d');
-      c.width = 1024;
-      c.height = Math.round(1024 * (canvas.height / canvas.width));
+      try {
+        const ctx = c.getContext('2d');
+        c.width = canvas.width > 2 ? canvas.width : window.innerWidth || 1024;
+        c.height = canvas.height > 2 ? canvas.height : window.innerHeight || 1024;
 
-      renderer.render(sceneEl.object3D, sceneEl.camera);
-      ctx.drawImage(canvas, 0, 0, c.width, c.height);
+        // A-FrameのシーンをレンダリングしてCanvasに落とす
+        renderer.render(sceneEl.object3D, sceneEl.camera);
+        ctx.drawImage(canvas, 0, 0, c.width, c.height);
 
-      const dataUrl = c.toDataURL('image/jpeg', 0.8);
-      document.getElementById('previewImg').src = dataUrl;
-      document.getElementById('previewContainer').style.display = 'block';
+        const dataUrl = c.toDataURL('image/jpeg', 0.8);
+        // ベース64データが短すぎる（ほぼ真っ黒や空文字）場合は失敗とみなす
+        const base64 = dataUrl.split(',')[1];
+        if (!base64 || base64.length < 100) {
+          return null;
+        }
 
-      return dataUrl.split(',')[1];
+        document.getElementById('previewImg').src = dataUrl;
+        document.getElementById('previewContainer').style.display = 'block';
+
+        return base64;
+      } catch (e) {
+        console.error("キャプチャ例外:", e);
+        return null;
+      }
     }
 
     // ====== 追加: 音声合成 (読み上げ) ======
