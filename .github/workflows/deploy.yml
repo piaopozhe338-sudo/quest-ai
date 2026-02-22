@@ -1,0 +1,25 @@
+name: Deploy to GitHub Pages with API Key
+
+on:
+  push:
+    branches:
+      - main  # あなたのメインブランチ名に合わせてください（masterの場合はmasterに変更）
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject API Key
+        run: |
+          # index.html 内のプレースホルダーを GitHub Secrets の値に書き換えます
+          sed -i "s/__API_KEY_PLACEHOLDER__/${{ secrets.GEMINI_API_KEY }}/g" index.html
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages # 公開専用のブランチにデプロイ
