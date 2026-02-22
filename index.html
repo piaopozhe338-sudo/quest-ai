@@ -47,7 +47,7 @@
       background: rgba(0, 0, 0, 0.9);
       color: #fff;
       width: 85%;
-      max-height: 200px;
+      max-height: 180px;
       overflow-y: auto;
       margin-top: 15px;
       padding: 12px;
@@ -55,7 +55,27 @@
       font-size: 13px;
       text-align: left;
       pointer-events: auto;
-      border: 1px solid #ff9f43;
+      border: 1px solid #00ffcc;
+    }
+
+    #previewContainer {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 120px;
+      height: 90px;
+      border: 2px solid #00ffcc;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #222;
+      z-index: 110;
+      display: none;
+    }
+
+    #previewImg {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
   </style>
 </head>
@@ -74,7 +94,8 @@
   </a-scene>
 
   <div id="overlay">
-    <button id="btn" onclick="takePhoto()" disabled>準備中...</button>
+    <div id="previewContainer"><img id="previewImg" src=""></div>
+    <button id="btn" onclick="takePhoto()">📷 解析スタート</button>
     <div id="log">起動中...</div>
     <video id="v" autoplay playsinline style="display:none"></video>
     <canvas id="c" style="display:none"></canvas>
@@ -89,6 +110,9 @@
     const btn = document.getElementById('btn');
 
     let targetModel = "";
+    // Define API_VERSIONS and MODELS based on the new takePhoto logic
+    const API_VERSIONS = ['v1beta']; // Assuming this is the version used in the new takePhoto
+    let MODELS = []; // This will be populated by fetchAvailableModels
 
     function print(msg, color = '') {
       const d = document.createElement('div');
@@ -123,6 +147,7 @@
 
           // Flashが見つかればそれ、なければ（仕方なく）リストの先頭を使うが、Proは避ける
           targetModel = flash || validModels.find(m => !m.includes('pro')) || validModels[0];
+          MODELS = [targetModel]; // Populate MODELS array for the new takePhoto function
 
           print(`✅ 最適なモデル(軽量)を自動選択: ${targetModel}`, "#0f0");
           vrResult.setAttribute('value', `使用モデル:\n${targetModel}\n準備完了です`);
@@ -166,46 +191,69 @@
 
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
-      if (!targetModel) {
-        alert("モデルが見つかっていないため実行できません。");
-        return;
-      }
       document.body.classList.add('processing');
 
-      print(`解析中 (${targetModel})...`, "#fb0");
-      vrResult.setAttribute('value', "AIに画像を送信しています...");
+      print("画像をキャプチャ中...", "#fb0");
+      vrResult.setAttribute('value', "画像を準備中...");
 
       try {
         const ctx = c.getContext('2d');
         c.width = v.videoWidth; c.height = v.videoHeight;
         ctx.drawImage(v, 0, 0);
-        const base64 = c.toDataURL('image/jpeg', 0.8).split(',')[1];
+        const dataUrl = c.toDataURL('image/jpeg', 0.8);
+        const base64 = dataUrl.split(',')[1];
+
+        // プレビュー表示
+        const previewImg = document.getElementById('previewImg');
+        const previewContainer = document.getElementById('previewContainer');
+        previewImg.src = dataUrl;
+        previewContainer.style.display = 'block';
+        print("キャプチャ完了。AIに送信します...");
+
         const key = GEMINI_CONFIG.apiKey.trim();
+        let lastError = "";
 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`;
+        for (const ver of API_VERSIONS) {
+          for (const model of MODELS) {
+            try {
+              const apiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`;
+              print(`送信中 (${ver}/${model})...`);
+              vrResult.setAttribute('value', "AIが考え中...");
 
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
-          })
-        });
+              const res = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+                })
+              });
 
-        const data = await res.json();
-        if (res.ok) {
-          const reply = data.candidates[0].content.parts[0].text;
-          print("解析成功", "#0f0");
+              const data = await res.json();
+              if (res.ok) {
+                const reply = data.candidates[0].content.parts[0].text;
+                print("解析が完了しました！", "#0f0");
 
-          // VRパネルに回答を大きく表示
-          vrStatus.setAttribute('value', "AIの解析結果");
-          vrStatus.setAttribute('color', "#0f0");
-          vrResult.setAttribute('value', reply);
-          vrResult.setAttribute('color', "#fff");
-        } else {
-          const errMsg = data.error ? data.error.message : "HTTP " + res.status;
-          throw new Error(errMsg);
+                // VRパネルに回答を大きく表示
+                vrStatus.setAttribute('value', "AIの解析結果");
+                vrStatus.setAttribute('color', "#0f0");
+                vrResult.setAttribute('value', reply);
+                vrResult.setAttribute('color', "#fff");
+
+                document.body.classList.remove('processing');
+                return;
+              } else {
+                lastError = data.error ? data.error.message : "HTTP " + res.status;
+                print(`エラー (${model}): ${lastError}`, "#f55");
+                if (lastError.includes("not found")) continue;
+                throw new Error(lastError);
+              }
+            } catch (e) {
+              lastError = e.message;
+              continue;
+            }
+          }
         }
+        throw new Error("全モデルで失敗しました: " + lastError);
       } catch (e) {
         print("失敗: " + e.message, "#f55");
         vrResult.setAttribute('value', "エラー詳細:\n" + e.message);
