@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>AI Vision Stable</title>
+  <title>AI Vision (Auto-Repair Ver)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="config.js"></script>
@@ -26,59 +26,55 @@
       align-items: center;
       justify-content: flex-end;
       pointer-events: none;
-      padding-bottom: 50px;
+      padding-bottom: 40px;
       z-index: 100;
     }
 
     #btn {
-      padding: 25px 50px;
-      font-size: 24px;
-      background: #fb0;
+      padding: 20px 40px;
+      font-size: 22px;
+      background: #00ffcc;
       border: none;
-      border-radius: 60px;
+      border-radius: 50px;
       font-weight: bold;
       cursor: pointer;
       pointer-events: auto;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4);
     }
 
     #log {
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.9);
       color: #fff;
-      width: 80%;
-      max-height: 200px;
+      width: 85%;
+      max-height: 180px;
       overflow-y: auto;
-      margin-top: 20px;
-      padding: 15px;
-      border-radius: 10px;
-      font-size: 14px;
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 13px;
       text-align: left;
       pointer-events: auto;
-      border: 2px solid #fb0;
+      border: 1px solid #00ffcc;
     }
   </style>
 </head>
 
 <body>
   <a-scene webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers; overlayElement: #overlay;" embedded>
-    <a-entity id="rig" position="0 1.6 0">
-      <a-camera look-controls></a-camera>
-    </a-entity>
-
-    <!-- VRパネル -->
-    <a-entity position="0 1.5 -1.5">
-      <a-plane color="#000" width="2" height="1.2" opacity="0.9">
-        <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#fb0"
-          position="0 0.3 0.01"></a-text>
-        <a-text id="vrResult" value="Waiting for scan..." align="center" width="1.8" wrap-count="30"
+    <a-entity position="0 1.5 -1.2">
+      <a-plane color="#111" width="2" height="1.2" opacity="0.95">
+        <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc"
+          position="0 0.35 0.01"></a-text>
+        <a-text id="vrResult" value="環境を認識中..." align="center" width="1.8" wrap-count="35"
           position="0 -0.1 0.01"></a-text>
       </a-plane>
     </a-entity>
+    <a-entity camera look-controls></a-entity>
   </a-scene>
 
   <div id="overlay">
-    <button id="btn" onclick="takePhoto()">📷 スキャン(確定版)</button>
-    <div id="log">アプリを起動しました</div>
+    <button id="btn" onclick="takePhoto()">📷 解析スタート</button>
+    <div id="log">起動中...</div>
     <video id="v" autoplay playsinline style="display:none"></video>
     <canvas id="c" style="display:none"></canvas>
   </div>
@@ -96,52 +92,78 @@
       d.innerText = `> ${msg}`;
       logEl.prepend(d);
       vrStatus.setAttribute('value', msg);
-      console.log(msg);
     }
 
     window.onload = () => {
-      print("設定を確認中...");
       if (typeof GEMINI_CONFIG === 'undefined') {
-        print("エラー: config.jsが読み込まれません。リロードしてください。", "#f55");
+        print("エラー: config.jsの読み込みを待機しています...", "#f55");
+        setTimeout(() => location.reload(), 2000);
         return;
       }
-      print(`ビルド: ${GEMINI_CONFIG.buildTime}`);
-      print("APIキー接続確認済み", "#0f0");
-
+      print(`最新ビルド 確認成功 (${GEMINI_CONFIG.buildTime})`, "#0f0");
       navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-        .then(s => { v.srcObject = s; print("カメラOK"); })
-        .catch(e => print("カメラNG: " + e.message, "#f55"));
+        .then(s => { v.srcObject = s; print("カメラ準備OK"); })
+        .catch(e => print("カメラエラー: " + e.message, "#f55"));
     };
 
+    // 接続先候補リスト (404対策)
+    const API_VERSIONS = ['v1', 'v1beta'];
+    const MODELS = ['gemini-1.5-flash', 'gemini-1.5-flash-latest'];
+
     async function takePhoto() {
-      if (!GEMINI_CONFIG || !GEMINI_CONFIG.apiKey) return;
-      print("解析中...", "#fb0");
-      vrResult.setAttribute('value', "AIが考え中...");
+      if (document.body.classList.contains('processing')) return;
+      document.body.classList.add('processing');
+
+      print("スキャン中...", "#fb0");
+      vrResult.setAttribute('value', "AIに接続しています...");
 
       try {
         const ctx = c.getContext('2d');
         c.width = v.videoWidth; c.height = v.videoHeight;
         ctx.drawImage(v, 0, 0);
-        const base64 = c.toDataURL('image/jpeg', 0.7).split(',')[1];
+        const base64 = c.toDataURL('image/jpeg', 0.8).split(',')[1];
+        const key = GEMINI_CONFIG.apiKey.trim();
 
-        // 安定版 API v1 を使用
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_CONFIG.apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
-          })
-        });
+        let lastError = "";
 
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ? data.error.message : "APIエラー");
+        // バージョンとモデルの組み合わせを全て試す (自己修復機能)
+        for (const ver of API_VERSIONS) {
+          for (const model of MODELS) {
+            try {
+              const apiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`;
+              print(`${ver}/${model} で試行中...`);
 
-        const reply = data.candidates[0].content.parts[0].text;
-        print("解析成功", "#0f0");
-        vrResult.setAttribute('value', reply);
+              const res = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+                })
+              });
+
+              const data = await res.json();
+              if (res.ok) {
+                print("解析成功！", "#0f0");
+                vrResult.setAttribute('value', data.candidates[0].content.parts[0].text);
+                document.body.classList.remove('processing');
+                return; // 成功したら終了
+              } else {
+                lastError = data.error ? data.error.message : "HTTP " + res.status;
+                if (lastError.includes("not found")) continue; // 次の候補へ
+                throw new Error(lastError);
+              }
+            } catch (e) {
+              lastError = e.message;
+              continue;
+            }
+          }
+        }
+        throw new Error("全モデルで試行しましたが失敗しました: " + lastError);
       } catch (e) {
         print("失敗: " + e.message, "#f55");
-        vrResult.setAttribute('value', "エラー: " + e.message);
+        vrResult.setAttribute('value', "エラー詳細:\n" + e.message);
+      } finally {
+        document.body.classList.remove('processing');
       }
     }
   </script>
