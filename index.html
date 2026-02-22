@@ -204,10 +204,10 @@
       </a-plane>
     </a-entity>
 
-    <!-- 追加: 空間ピン留め（バーチャル付箋）を展開する用のコンテナ（カメラから少し手前下） -->
-    <a-entity id="pinsContainer" position="0 1.0 -1.5"></a-entity>
-
-    <a-entity camera look-controls></a-entity>
+    <a-entity camera look-controls>
+      <!-- 追加: 空間ピン留め（バーチャル付箋）を展開する用のコンテナ（カメラに追従） -->
+      <a-entity id="pinsContainer" position="0 -0.2 -1.5"></a-entity>
+    </a-entity>
   </a-scene>
 
   <div id="overlay">
@@ -422,7 +422,7 @@
                 plane.setAttribute('width', '1.0');
                 plane.setAttribute('height', '0.4');
                 plane.setAttribute('opacity', '0.9');
-                plane.setAttribute('material', 'shader: flat'); // 影の影響を受けないフラットな表示
+                plane.setAttribute('material', 'shader: flat; side: double'); // 裏からも見えるように
 
                 // 付箋の文字（商品名） 日本語フォント指定
                 const text = document.createElement('a-text');
