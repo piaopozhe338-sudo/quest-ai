@@ -273,16 +273,13 @@
       recognition.maxAlternatives = 1;
 
       recognition.onstart = function () {
+        // UI更新は toggleMic 側で即座に行うため、ここは状態フラグの確実なセットのみ
         isRecording = true;
-        micBtn.innerHTML = '🛑 録音停止 (発話中...)';
-        micBtn.style.background = '#ff0000';
-        print("マイク録音中... 話しかけてください", "#0f0");
-        vrResult.setAttribute('value', "録音中... (終わったら停止ボタン)");
       };
 
       recognition.onresult = function (event) {
         recordedText = event.results[0][0].transcript;
-        print(`🎤 あなたの質問: "${recordedText}"`, "#0f0");
+        print(`🎤 認識した質問: "${recordedText}"`, "#0f0"); // パネルに表示
       };
 
       recognition.onerror = function (event) {
@@ -296,7 +293,9 @@
           vrResult.setAttribute('value', "質問と画像を送信中...");
           sendToAI(tempImageBase64); // 自動で送信
         } else if (recordedText) {
-          vrResult.setAttribute('value', "質問を受け付けました。手動で解析してください。");
+          vrResult.setAttribute('value', "質問を受付済。写真を選択してください");
+          // 停止時にもう一度ログに出してあげる
+          print(`👉 次に写真を送ると「${recordedText}」への回答が来ます`, "#0ff");
         }
       };
     }
@@ -310,10 +309,19 @@
     async function toggleMic() {
       if (!recognition) return;
       if (isRecording) {
+        // 即座にUIを戻して停止命令を出す
+        resetMicBtn();
         recognition.stop();
       } else {
         recordedText = "";
         tempImageBase64 = ""; // リセット
+
+        // UIを即座に「録音中」に切り替える（APIの起動ラグを隠すため）
+        isRecording = true;
+        micBtn.innerHTML = '🛑 録音停止 (発話中...)';
+        micBtn.style.background = '#ff0000';
+        print("マイク録音中... 話しかけてください", "#0f0");
+        vrResult.setAttribute('value', "録音中... (終わったら停止ボタン)");
 
         // 裏でこっそりVRキャプチャを撮っておく
         tempImageBase64 = captureVRImage();
