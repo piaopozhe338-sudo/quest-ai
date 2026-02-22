@@ -242,13 +242,60 @@
 
     let targetModel = "";
     let availableModels = [];
-    let sceneEl = null;
-
-    // ====== 追加: 音声関係の変数 ======
-    let recognition = null;
     let isRecording = false;
-    let recordedText = ""; // ユーザーが発話した内容を保持
-    let tempImageBase64 = ""; // 音声質問開始時に裏で撮る写真データ
+    let recordedText = "";
+    let recognition = null;
+    let sceneEl;
+    let recordStartTime = 0;
+    let tempImageBase64 = "";
+
+    // Web Audio API による診断用
+    let audioContext = null;
+    let analyser = null;
+    let microphoneStream = null;
+    let volumeMonitorTimer = null;
+
+    function initAudioDiagnostic(stream) {
+      if (!window.AudioContext && !window.webkitAudioContext) return;
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        analyser.fftSize = 256;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        print("💡 音量診断を開始しました（声に反応するかチェック）", "#aaa");
+
+        volumeMonitorTimer = setInterval(() => {
+          if (!isRecording) return;
+          analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+          let average = sum / bufferLength;
+
+          if (average > 5) { // 一定以上の音量を検知
+            vrResult.setAttribute('value', `🎤 入力検知: ${Math.round(average)} | ${recordedText || '...'}`);
+          }
+        }, 200);
+      } catch (e) {
+        console.error("Audio Diagnostic Error:", e);
+      }
+    }
+
+    function stopAudioDiagnostic() {
+      if (volumeMonitorTimer) clearInterval(volumeMonitorTimer);
+      if (microphoneStream) {
+        microphoneStream.getTracks().forEach(track => track.stop());
+        microphoneStream = null;
+      }
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+      }
+    }
 
     function print(msg, color = '') {
       const d = document.createElement('div');
@@ -263,25 +310,26 @@
 
     // ====== 追加: 音声認識の初期設定 ======
     function initSpeechRecognition() {
-      // 毎回作り直す（状態不整合を防ぐため）
+      if (recognition) return;
+
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        print("💡 音声認識非対応のブラウザです", "#f55");
+        print("⚠️ お使いのブラウザは音声認識に対応していません。", "#f55");
+        micBtn.disabled = true;
         return;
       }
 
       recognition = new SpeechRecognition();
       recognition.lang = 'ja-JP';
       recognition.interimResults = true;
-      recognition.continuous = true; // 長めの発話や間を許容する
+      recognition.continuous = true;
       recognition.maxAlternatives = 1;
 
       recognition.onstart = function () {
         isRecording = true;
-        print("💡 音声エンジン起動...", "#aaa");
+        print("🎤 録音中...", "#0f0");
         micBtn.innerHTML = '🛑 録音停止';
         micBtn.style.background = '#ff0000';
-        vrResult.setAttribute('value', "録音中...");
       };
 
       recognition.onresult = function (event) {
@@ -291,29 +339,31 @@
         }
         if (transcript) {
           recordedText = transcript;
-          vrResult.setAttribute('value', `🎤: ${recordedText}`);
-          print(`🎤 認識中: "${recordedText}"`, "#0f0");
+          // vrResultは音量診断と共有するため、ここでは更新しない
+          // ログが埋まらないよう、確定時のみ出力
+          if (event.results[event.results.length - 1].isFinal) {
+            print(`🎤 確定: "${recordedText}"`, "#0f0");
+          }
         }
       };
 
       recognition.onerror = function (event) {
         print(`⚠️ マイクエラー: ${event.error}`, "#f55");
         resetMicBtn();
+        stopAudioDiagnostic();
       };
 
-      recognition.onaudiostart = () => print("💡 音入力検知開始 (Microphone Active)", "#aaa");
-      recognition.onsoundstart = () => print("� 音を検知中...", "#aaa");
-      recognition.onspeechstart = () => print("💡 あなたの声を検知！", "#0f0");
-      recognition.onsoundend = () => print("💡 音入力検知終了 (Microphone Inactive)", "#aaa");
       recognition.onend = function () {
-        print(`💡 録音プロセスが終了しました`, "#aaa");
         resetMicBtn();
+        stopAudioDiagnostic();
         let duration = Date.now() - recordStartTime;
+        print(`💡 終了 (${Math.round(duration / 1000)}秒)`, "#aaa");
+
         if (tempImageBase64) {
           vrResult.setAttribute('value', "解析中...");
           sendToAI(tempImageBase64);
         } else if (recordedText) {
-          vrResult.setAttribute('value', "写真待ち...");
+          vrResult.setAttribute('value', "画像待ち...");
           print(`👉 写真を送れば "${recordedText}" を解析します`, "#0ff");
         }
       };
@@ -329,32 +379,39 @@
 
     let isProcessing = false;
 
-    function toggleMic() {
+    async function toggleMic() {
       if (isProcessing) return;
       isProcessing = true;
 
-      // 毎回新しく作る
-      recognition = null;
-      initSpeechRecognition();
+      if (!recognition) initSpeechRecognition();
 
-      try {
-        if (isRecording) {
-          print("💡 停止命令を送ります...", "#aaa");
-          recognition.stop();
-        } else {
-          recordedText = "";
-          tempImageBase64 = "";
-          recordStartTime = Date.now();
+      if (isRecording) {
+        try { recognition.stop(); } catch (e) { }
+        resetMicBtn();
+        stopAudioDiagnostic();
+        isProcessing = false;
+      } else {
+        recordedText = "";
+        tempImageBase64 = "";
+        recordStartTime = Date.now();
 
-          // ユーザージェスチャから速攻で起動
+        try {
+          // 権限確認と診断開始
+          print("💡 マイクをチェック中...", "#aaa");
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          initAudioDiagnostic(stream);
+          microphoneStream = stream;
+
+          // 遅延なしで即起動
           recognition.start();
           tempImageBase64 = captureVRImage();
+        } catch (e) {
+          print(`⚠️ マイク起動失敗: ${e.message}`, "#f55");
+          resetMicBtn();
+          stopAudioDiagnostic();
+        } finally {
+          isProcessing = false;
         }
-      } catch (e) {
-        print(`⚠️ 処理失敗: ${e.message}`, "#f55");
-        resetMicBtn();
-      } finally {
-        isProcessing = false;
       }
     }
 
@@ -455,7 +512,7 @@
       wakeupSpeech(); // ページロード時にもウォームアップ
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
-        print(`ビルド: 2026-02-23 03:35 (Voice Debug v8)`);
+        print(`ビルド: 2026-02-23 03:45 (Audio Diagnosis v9)`);
         const success = await fetchAvailableModels(GEMINI_CONFIG.apiKey.trim());
         if (success) btn.disabled = false;
       }
