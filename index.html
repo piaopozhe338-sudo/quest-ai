@@ -187,14 +187,26 @@
   <a-scene
     webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers, camera-access; overlayElement: #overlay;"
     embedded>
+    <!-- 追加: 日本語フォントのアセット読み込み -->
+    <a-assets>
+      <a-asset-item id="noto-font"
+        src="https://raw.githubusercontent.com/etiennepinchon/aframe-fonts/master/fonts/notosanscjkjp/NotoSansCJKjp-Regular.json"></a-asset-item>
+    </a-assets>
+
     <a-entity position="0 1.5 -1.2">
       <a-plane color="#111" width="2" height="1.4" opacity="0.95">
-        <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc"
-          position="0 0.45 0.01"></a-text>
-        <a-text id="vrResult" value="AIに画像を送って解析します" align="center" width="1.8" wrap-count="35"
-          position="0 -0.1 0.01"></a-text>
+        <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc" position="0 0.45 0.01"
+          font="https://raw.githubusercontent.com/etiennepinchon/aframe-fonts/master/fonts/notosanscjkjp/NotoSansCJKjp-Regular.json"
+          shader="msdf"></a-text>
+        <a-text id="vrResult" value="AIに画像を送って解析します" align="center" width="1.8" wrap-count="35" position="0 -0.1 0.01"
+          font="https://raw.githubusercontent.com/etiennepinchon/aframe-fonts/master/fonts/notosanscjkjp/NotoSansCJKjp-Regular.json"
+          shader="msdf"></a-text>
       </a-plane>
     </a-entity>
+
+    <!-- 追加: 空間ピン留め（バーチャル付箋）を展開する用のコンテナ（カメラから少し手前下） -->
+    <a-entity id="pinsContainer" position="0 1.0 -1.5"></a-entity>
+
     <a-entity camera look-controls></a-entity>
   </a-scene>
 
@@ -381,6 +393,57 @@
 
             vrStatus.setAttribute('value', "AIの解析結果");
             vrResult.setAttribute('value', "(画面の回答をご覧ください)");
+
+            // ===== 追加: バーチャル付箋（空間ピン留め）の生成 =====
+            const pinsContainer = document.getElementById('pinsContainer');
+            pinsContainer.innerHTML = ''; // 前回の付箋をクリア
+
+            if (aiResult.products && aiResult.products.length > 0) {
+              const total = aiResult.products.length;
+              // 横に並べるための間隔と開始位置の計算
+              const spacing = 1.2;
+              const startX = -((total - 1) * spacing) / 2;
+
+              aiResult.products.forEach((prod, idx) => {
+                if (!prod.name) return;
+
+                // 付箋の親エンティティ
+                const pin = document.createElement('a-entity');
+                let posX = startX + (idx * spacing);
+                // 配置: 横に並べ、少しアーチ状（yとzを変える）に配置するとカッコいい
+                let posZ = Math.abs(posX) * 0.2; // 端にいくほど少し手前に
+                pin.setAttribute('position', `${posX} 0 ${posZ}`);
+                // カメラの方へ少し向ける
+                pin.setAttribute('rotation', `0 ${-posX * 15} 0`);
+
+                // 付箋の背景（黄色い紙っぽく）
+                const plane = document.createElement('a-plane');
+                plane.setAttribute('color', '#ffee88');
+                plane.setAttribute('width', '1.0');
+                plane.setAttribute('height', '0.4');
+                plane.setAttribute('opacity', '0.9');
+                plane.setAttribute('material', 'shader: flat'); // 影の影響を受けないフラットな表示
+
+                // 付箋の文字（商品名） 日本語フォント指定
+                const text = document.createElement('a-text');
+                text.setAttribute('value', prod.name);
+                text.setAttribute('color', '#000000');
+                text.setAttribute('align', 'center');
+                text.setAttribute('width', '0.9'); // Planeより少し小さくして折り返し
+                text.setAttribute('wrap-count', '15'); // 15文字で改行
+                text.setAttribute('position', '0 0 0.01'); // Planeの少し前に浮かせる
+
+                // A-Frameの日本語フォントを設定 (MSDF形式)
+                const fontUrl = "https://raw.githubusercontent.com/etiennepinchon/aframe-fonts/master/fonts/notosanscjkjp/NotoSansCJKjp-Regular.json";
+                text.setAttribute('font', fontUrl);
+                text.setAttribute('shader', 'msdf');
+
+                // 組み立ててSceneに追加
+                pin.appendChild(plane);
+                pin.appendChild(text);
+                pinsContainer.appendChild(pin);
+              });
+            }
 
             anySuccess = true;
             break; // 成功したためループを抜ける
