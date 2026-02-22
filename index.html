@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>AI Vision (Fixed AR Capture)</title>
+  <title>AI Vision (Photo Upload Fallback)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="config.js"></script>
@@ -26,28 +26,58 @@
       align-items: center;
       justify-content: flex-end;
       pointer-events: none;
-      padding-bottom: 40px;
+      padding-bottom: 20px;
       z-index: 100;
     }
 
-    #btn {
-      padding: 20px 40px;
-      font-size: 22px;
+    .btn-container {
+      display: flex;
+      gap: 15px;
+      flex-wrap: wrap;
+      justify-content: center;
+      pointer-events: auto;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      border-radius: 10px;
+    }
+
+    .action-btn {
+      padding: 15px 25px;
+      font-size: 18px;
       background: #00ffcc;
       border: none;
       border-radius: 50px;
       font-weight: bold;
       cursor: pointer;
-      pointer-events: auto;
+      color: #000;
       box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4);
       border: 2px solid #fff;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .action-btn:disabled {
+      background: #555;
+      color: #888;
+      cursor: not-allowed;
+      border-color: #555;
+    }
+
+    .upload-btn {
+      background: #ff9f43;
+      color: #fff;
+    }
+
+    #fileInput {
+      display: none;
     }
 
     #log {
       background: rgba(0, 0, 0, 0.9);
       color: #fff;
       width: 85%;
-      max-height: 180px;
+      max-height: 140px;
       overflow-y: auto;
       margin-top: 15px;
       padding: 12px;
@@ -88,7 +118,7 @@
       <a-plane color="#111" width="2" height="1.4" opacity="0.95">
         <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc"
           position="0 0.45 0.01"></a-text>
-        <a-text id="vrResult" value="ARセッションを開始してください" align="center" width="1.8" wrap-count="35"
+        <a-text id="vrResult" value="AIに画像を送って解析します" align="center" width="1.8" wrap-count="35"
           position="0 -0.1 0.01"></a-text>
       </a-plane>
     </a-entity>
@@ -97,8 +127,16 @@
 
   <div id="overlay">
     <div id="previewContainer"><img id="previewImg" src=""></div>
-    <button id="btn" onclick="takePhoto()" disabled>準備中...</button>
-    <div id="log">起動中...</div>
+    <div class="btn-container">
+      <button id="btn" class="action-btn" onclick="takePhoto()" disabled>📷 VRキャプチャ</button>
+      <label id="uploadBtnLabel" class="action-btn upload-btn" for="fileInput">📁 写真を選択 (推奨)</label>
+      <input type="file" id="fileInput" accept="image/jpeg, image/png">
+    </div>
+    <div id="log">
+      起動中...<br>
+      <span style="color:#ff9f43">※Meta Questのプライバシー仕様により、JSからのカメラ取得は制限されています。<br>
+        Questのスクショ機能（Metaボタン+右トリガー）で撮影し、「写真を選択」からアップロードしてください。</span>
+    </div>
     <canvas id="c" style="display:none"></canvas>
   </div>
 
@@ -108,6 +146,7 @@
     const vrResult = document.getElementById('vrResult');
     const c = document.getElementById('c');
     const btn = document.getElementById('btn');
+    const fileInput = document.getElementById('fileInput');
 
     let targetModel = "";
     let sceneEl = null;
@@ -115,9 +154,9 @@
     function print(msg, color = '') {
       const d = document.createElement('div');
       if (color) d.style.color = color;
-      d.innerText = `> ${msg}`;
+      d.innerHTML = `> ${msg}`; // innerHTML to allow basic tags
       logEl.prepend(d);
-      vrStatus.setAttribute('value', msg);
+      vrStatus.setAttribute('value', msg.replace(/<[^>]*>?/gm, ''));
     }
 
     async function fetchAvailableModels(key) {
@@ -137,7 +176,7 @@
     window.onload = async () => {
       sceneEl = document.querySelector('a-scene');
       sceneEl.addEventListener('enter-vr', () => {
-        print("実世界キャプチャ 有効化 (AR)", "#0f0");
+        print("ARモード開始（Quest仕様の制限に注意）", "#0f0");
       });
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
@@ -147,47 +186,35 @@
       }
     };
 
-    async function takePhoto() {
-      if (document.body.classList.contains('processing')) return;
+    // ====== 手動アップロード処理 ======
+    fileInput.addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
 
-      // 重要: a-scene エンティティから renderer と canvas を取得
-      const renderer = sceneEl.renderer;
-      if (!renderer) {
-        print("エラー: レンダラーが準備できていません", "#f55");
-        return;
-      }
-
-      const canvas = renderer.domElement;
-      if (!canvas || canvas.width <= 1 || canvas.height <= 1) {
-        print("エラー: キャンバスが見つからないかサイズが異常です", "#f55");
-        return;
-      }
-
-      document.body.classList.add('processing');
-      print(`実世界を解析中... (${canvas.width}x${canvas.height})`, "#fb0");
-
-      try {
-        // A-Frame/Three.js の描画完了を待ってからキャプチャするための措置
-        // preserveDrawingBuffer:true が設定されていない場合、通常は
-        // レンダリング直後でないと内容が消えてしまうため A-Frame の render イベントに頼るか
-        // 直接描画後に呼び出す必要があります。
-        const ctx = c.getContext('2d');
-        c.width = 1024;
-        c.height = Math.round(1024 * (canvas.height / canvas.width));
-
-        // Quest の WebXR セッション中の描画を取得
-        renderer.render(sceneEl.object3D, sceneEl.camera);
-        ctx.drawImage(canvas, 0, 0, c.width, c.height);
-
-        const dataUrl = c.toDataURL('image/jpeg', 0.8);
+      const reader = new FileReader();
+      reader.onload = async function (event) {
+        const dataUrl = event.target.result;
         const base64 = dataUrl.split(',')[1];
 
         document.getElementById('previewImg').src = dataUrl;
         document.getElementById('previewContainer').style.display = 'block';
 
-        print("AI送信中...");
-        vrResult.setAttribute('value', "AIに接続しています...");
+        print(`ファイル画像で解析を開始します... (${file.name})`, "#fb0");
+        await sendToAI(base64);
+        fileInput.value = ""; // リセット
+      };
+      reader.readAsDataURL(file);
+    });
 
+    // ====== AIへの送信処理共通化 ======
+    async function sendToAI(base64) {
+      if (document.body.classList.contains('processing')) return;
+      document.body.classList.add('processing');
+
+      print("AI送信中...");
+      vrResult.setAttribute('value', "AIに接続しています...");
+
+      try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_CONFIG.apiKey.trim()}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -210,6 +237,44 @@
         vrResult.setAttribute('value', "エラー: " + e.message);
       } finally {
         document.body.classList.remove('processing');
+      }
+    }
+
+    // ====== VRキャプチャ処理 (制限あり) ======
+    async function takePhoto() {
+      if (document.body.classList.contains('processing')) return;
+
+      const renderer = sceneEl.renderer;
+      if (!renderer) {
+        print("エラー: レンダラーが準備できていません", "#f55");
+        return;
+      }
+
+      const canvas = renderer.domElement;
+      if (!canvas || canvas.width <= 1 || canvas.height <= 1) {
+        print("エラー: Questのプライバシー保護により、カメラピクセルがブロックされています。「写真を選択」を試してください。", "#f55");
+        return;
+      }
+
+      print(`VRキャプチャを試行中... ※Quest仕様で真っ暗になる可能性があります`, "#fb0");
+
+      try {
+        const ctx = c.getContext('2d');
+        c.width = 1024;
+        c.height = Math.round(1024 * (canvas.height / canvas.width));
+
+        renderer.render(sceneEl.object3D, sceneEl.camera);
+        ctx.drawImage(canvas, 0, 0, c.width, c.height);
+
+        const dataUrl = c.toDataURL('image/jpeg', 0.8);
+        const base64 = dataUrl.split(',')[1];
+
+        document.getElementById('previewImg').src = dataUrl;
+        document.getElementById('previewContainer').style.display = 'block';
+
+        await sendToAI(base64);
+      } catch (e) {
+        print("キャプチャ失敗: プライバシー制限の可能性があります。「写真を選択」を利用してください。", "#f55");
       }
     }
   </script>
