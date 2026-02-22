@@ -172,17 +172,27 @@
           body: JSON.stringify(requestBody)
         });
 
+        const data = await response.json();
+
+        if (!response.ok) {
+          const errorMsg = data.error ? data.error.message : response.statusText;
+          throw new Error(`API ${response.status}: ${errorMsg}`);
+        }
+
         updateStatus("回答を受信しました");
 
-        const data = await response.json();
-        if (data.error) throw new Error(data.error.message);
+        if (!data.candidates || data.candidates.length === 0) {
+          throw new Error("AIが回答を生成できませんでした。画像が鮮明か確認してください。");
+        }
 
         const aiResponse = data.candidates[0].content.parts[0].text;
         updateStatus("解析完了");
         resultText.setAttribute('value', aiResponse);
       } catch (err) {
+        console.error("DEBUG ERROR:", err);
         updateStatus("エラー発生");
-        resultText.setAttribute('value', "APIエラーまたは通信に失敗しました。");
+        // パネルに詳細なエラーを表示
+        resultText.setAttribute('value', "エラー詳細: " + err.message);
       } finally {
         document.body.classList.remove('scanning');
         // 3秒後にステータスを戻す
