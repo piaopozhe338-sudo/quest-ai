@@ -252,9 +252,12 @@
 
     function print(msg, color = '') {
       const d = document.createElement('div');
-      if (color) d.style.color = color;
-      d.innerHTML = `> ${msg}`;
-      logEl.prepend(d);
+      d.style.color = color;
+      d.style.marginBottom = '2px';
+      d.innerHTML = msg;
+      logEl.appendChild(d);
+      // ログを常に最新（一番下）にスクロール
+      logEl.scrollTop = logEl.scrollHeight;
       vrStatus.setAttribute('value', msg.replace(/<[^>]*>?/gm, ''));
     }
 
@@ -290,6 +293,11 @@
         }
         recordedText = transcript;
         vrResult.setAttribute('value', `🎤 認識中: ${recordedText}`);
+
+        // ログ領域にもリアルタイムで表示（前回の認識中ログを書き換えるのではなく追記）
+        if (event.results[event.results.length - 1].isFinal) {
+          print(`<b>🎤 認識確定: "${recordedText}"</b>`, "#0f0");
+        }
       };
 
       recognition.onerror = function (event) {
