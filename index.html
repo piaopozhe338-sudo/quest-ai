@@ -88,6 +88,25 @@
       border: 1px solid #00ffcc;
     }
 
+    #answerBox {
+      background: rgba(0, 50, 0, 0.95);
+      color: #fff;
+      width: 85%;
+      max-height: 250px;
+      overflow-y: auto;
+      margin-top: 15px;
+      padding: 15px;
+      border-radius: 12px;
+      font-size: 18px;
+      font-weight: bold;
+      text-align: left;
+      pointer-events: auto;
+      border: 2px solid #0f0;
+      display: none;
+      box-shadow: 0 0 15px rgba(0, 255, 0, 0.3);
+      line-height: 1.4;
+    }
+
     #previewContainer {
       position: absolute;
       top: 10px;
@@ -127,6 +146,10 @@
 
   <div id="overlay">
     <div id="previewContainer"><img id="previewImg" src=""></div>
+
+    <!-- 追加: 日本語が確実に表示される回答枠 -->
+    <div id="answerBox"></div>
+
     <div class="btn-container">
       <button id="btn" class="action-btn" onclick="takePhoto()" disabled>📷 VRキャプチャ</button>
       <label id="uploadBtnLabel" class="action-btn upload-btn" for="fileInput">📁 写真を選択 (推奨)</label>
@@ -142,6 +165,7 @@
 
   <script>
     const logEl = document.getElementById('log');
+    const answerBox = document.getElementById('answerBox');
     const vrStatus = document.getElementById('vrStatus');
     const vrResult = document.getElementById('vrResult');
     const c = document.getElementById('c');
@@ -190,6 +214,7 @@
     fileInput.addEventListener('change', function (e) {
       const file = e.target.files[0];
       if (!file) return;
+      answerBox.style.display = 'none'; // 新しいキャプチャで一旦隠す
 
       const reader = new FileReader();
       reader.onload = async function (event) {
@@ -226,9 +251,16 @@
         const data = await res.json();
         if (res.ok) {
           const reply = data.candidates[0].content.parts[0].text;
-          print("解析完了！内容を表示します。", "#0f0");
+          print("解析完了！回答を表示します。", "#0f0");
+          print(`🤖回答: ${reply}`, "#0f0");
+
+          // a-text (3D) は日本語対応フォントが無いと見えなくなるため、
+          // DOM (2D画面) に専用の枠を出して確実に表示する
+          answerBox.style.display = 'block';
+          answerBox.innerText = `【AIの解析結果】\n${reply}`;
+
           vrStatus.setAttribute('value', "AIの解析結果");
-          vrResult.setAttribute('value', reply);
+          vrResult.setAttribute('value', "(画面の回答をご覧ください)");
         } else {
           throw new Error(data.error ? data.error.message : "APIエラー");
         }
@@ -243,6 +275,7 @@
     // ====== VRキャプチャ処理 (制限あり) ======
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
+      answerBox.style.display = 'none'; // 新しいキャプチャで一旦隠す
 
       const renderer = sceneEl.renderer;
       if (!renderer) {
