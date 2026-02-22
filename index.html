@@ -127,15 +127,22 @@
       object-fit: cover;
     }
 
+    .product-list {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-top: 15px;
+    }
+
     .product-info {
       display: flex;
       flex-direction: column;
-      gap: 12px;
-      margin-top: 15px;
+      gap: 8px;
       align-items: center;
       background: rgba(0, 0, 0, 0.4);
       padding: 15px;
       border-radius: 8px;
+      border: 1px solid #0f0;
     }
 
     .product-img-placeholder {
@@ -287,14 +294,21 @@
 
       try {
         const promptText = `
-あなたは優秀な画像解析アシスタントです。ユーザーがアップロードした画像を見て、写っているメインの物体・商品を特定してください。
+あなたは優秀な画像解析アシスタントです。ユーザーがアップロードした画像を見て、写っているメインの物体・商品（複数でも可）を特定してください。
 以下の厳密なJSON形式で出力してください。Markdownのコードブロック構文(\`\`\`json)等は一切含めず、純粋なJSON文字列だけを返してください。
 
 {
   "description": "画像の簡単な説明（日本語2〜3行）",
-  "isProduct": true/false (特定の市販商品やガジェット、ブランド品などの場合はtrue),
-  "productName": "商品名（isProductがtrueの場合のみ。なるべく正確なモデル名や一般的な検索キーワードになる名前）"
+  "products": [
+    {
+      "name": "商品名1（なるべく正確なモデル名や一般的な検索キーワードになる名前）"
+    },
+    {
+      "name": "商品名2（複数ある場合に追加）"
+    }
+  ]
 }
+※商品がない場合や特定不能な場合は "products": [] としてください。
 `;
 
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_CONFIG.apiKey.trim()}`, {
@@ -320,8 +334,7 @@
             // パース失敗時のフォールバック
             aiResult = {
               description: replyText,
-              isProduct: false,
-              productName: ""
+              products: []
             };
           }
 
@@ -332,23 +345,32 @@
 
           let htmlContent = `<strong>【AIの解析結果】</strong><br><br>${aiResult.description.replace(/\\n/g, '<br>')}`;
 
-          if (aiResult.isProduct && aiResult.productName) {
-            const encodedName = encodeURIComponent(aiResult.productName);
-            const amazonUrl = `https://www.amazon.co.jp/s?k=${encodedName}`;
-            const rakutenUrl = `https://search.rakuten.co.jp/search/mall/${encodedName}/`;
-
+          if (aiResult.products && aiResult.products.length > 0) {
             htmlContent += `
               <hr style="border-color:#555; margin: 15px 0;">
-              <div class="product-info">
-                <strong>🛒 認識された商品:</strong>
-                <div style="font-size: 1.1em; color: #0f0; margin-bottom: 5px;">${aiResult.productName}</div>
-                <div class="product-img-placeholder">📦</div>
-                <div class="shop-links">
-                  <a href="${amazonUrl}" target="_blank" class="shop-btn btn-amazon">Amazonで探す</a>
-                  <a href="${rakutenUrl}" target="_blank" class="shop-btn btn-rakuten">楽天で探す</a>
-                </div>
-              </div>
+              <strong>🛒 認識された商品 (${aiResult.products.length}点):</strong>
+              <div class="product-list">
             `;
+
+            aiResult.products.forEach(prod => {
+              if (!prod.name) return;
+              const encodedName = encodeURIComponent(prod.name);
+              const amazonUrl = `https://www.amazon.co.jp/s?k=${encodedName}`;
+              const rakutenUrl = `https://search.rakuten.co.jp/search/mall/${encodedName}/`;
+
+              htmlContent += `
+                  <div class="product-info">
+                    <div style="font-size: 1.1em; color: #0f0; margin-bottom: 5px;">${prod.name}</div>
+                    <div class="product-img-placeholder">📦</div>
+                    <div class="shop-links">
+                      <a href="${amazonUrl}" target="_blank" class="shop-btn btn-amazon">Amazonで探す</a>
+                      <a href="${rakutenUrl}" target="_blank" class="shop-btn btn-rakuten">楽天で探す</a>
+                    </div>
+                  </div>
+                `;
+            });
+
+            htmlContent += `</div>`;
           }
 
           answerBox.innerHTML = htmlContent;
