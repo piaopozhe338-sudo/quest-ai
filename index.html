@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>AI Vision (WebXR Pro)</title>
+  <title>AI Vision (Fixed Capture)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="config.js"></script>
@@ -88,7 +88,7 @@
       <a-plane color="#111" width="2" height="1.4" opacity="0.95">
         <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc"
           position="0 0.45 0.01"></a-text>
-        <a-text id="vrResult" value="セッションを開始してください" align="center" width="1.8" wrap-count="35"
+        <a-text id="vrResult" value="ARセッションを開始してください" align="center" width="1.8" wrap-count="35"
           position="0 -0.1 0.01"></a-text>
       </a-plane>
     </a-entity>
@@ -111,8 +111,6 @@
 
     let targetModel = "";
     let xrSession = null;
-    let gl = null;
-    let xrBaseLayer = null;
 
     function print(msg, color = '') {
       const d = document.createElement('div');
@@ -140,8 +138,7 @@
       const scene = document.querySelector('a-scene');
       scene.addEventListener('enter-vr', () => {
         xrSession = scene.renderer.xr.getSession();
-        gl = scene.renderer.getContext();
-        print("実世界キャプチャ(WebXR) 有効化", "#0f0");
+        print("実世界キャプチャ 有効化", "#0f0");
       });
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
@@ -153,26 +150,26 @@
 
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
+
+      const scene = document.querySelector('a-scene');
+      // A-Frameのrendererから現在のキャンバスを取得
+      const renderer = scene.renderer;
+      const canvas = renderer.domElement;
+
+      if (!canvas || canvas.width <= 0 || canvas.height <= 0) {
+        print("エラー: キャンバスが正しく生成されていません。ARモードに入っていますか？", "#f55");
+        return;
+      }
+
       document.body.classList.add('processing');
-      print("実世界をキャプチャ中...", "#fb0");
+      print(`実世界を解析中... (${canvas.width}x${canvas.height})`, "#fb0");
 
       try {
         const ctx = c.getContext('2d');
-        const scene = document.querySelector('a-scene');
-        const canvas = scene.canvas;
+        c.width = 1024; // 固定解像度でキャプチャ
+        c.height = Math.round(1024 * (canvas.height / canvas.width));
 
-        // Quest 3 パススルーキャプチャの安定したフォールバック
-        // 通常のARセッションでのキャンバスサイズを確認
-        if (canvas.width === 0 || canvas.height === 0) {
-          throw new Error("キャンバスサイズが異常です。");
-        }
-
-        c.width = canvas.width;
-        c.height = canvas.height;
-
-        // 3Dアバターを避け、実世界（カメラ）を映すために、
-        // A-Frameの描画結果をそのまま取得します。
-        // 注意: パススルーが真っ暗になる場合は、ブラウザ設定の「カメラアクセス」をオンにする必要があります。
+        // ARフレームの描画（パススルー背景込み）を取得
         ctx.drawImage(canvas, 0, 0, c.width, c.height);
 
         const dataUrl = c.toDataURL('image/jpeg', 0.8);
@@ -181,14 +178,14 @@
         document.getElementById('previewImg').src = dataUrl;
         document.getElementById('previewContainer').style.display = 'block';
 
-        print("送信中...");
-        vrResult.setAttribute('value', "AI解析中...");
+        print("AI送信中...");
+        vrResult.setAttribute('value', "AIに接続しています...");
 
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_CONFIG.apiKey.trim()}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+            contents: [{ parts: [{ text: "これ何？日本語1行で。写っている実世界のものを教えて。" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
           })
         });
 
