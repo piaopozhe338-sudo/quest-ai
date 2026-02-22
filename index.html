@@ -3,13 +3,12 @@
 
 <head>
   <meta charset="utf-8">
-  <title>Quest AI Vision (Debug Mode)</title>
-  <meta name="description" content="Quest 3 AI Passthrough App Debug">
+  <title>Quest AI Debugger</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <style>
     #overlay {
       position: absolute;
-      bottom: 30px;
+      bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
       width: 100%;
@@ -17,184 +16,144 @@
       pointer-events: none;
       z-index: 10;
       font-family: sans-serif;
+      color: white;
     }
 
     #captureBtn {
-      padding: 18px 36px;
-      font-size: 1.4rem;
+      padding: 20px 40px;
+      font-size: 1.5rem;
       pointer-events: auto;
       border-radius: 50px;
       border: none;
-      background: linear-gradient(135deg, #fbda61 0%, #ff5acd 100%);
+      background: #ff0055;
       color: white;
       font-weight: bold;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
       cursor: pointer;
     }
 
-    #uiStatusLabel {
-      color: #fff;
+    #debugLog {
       background: rgba(0, 0, 0, 0.8);
-      padding: 8px 20px;
-      border-radius: 20px;
-      font-size: 0.9rem;
-      display: inline-block;
+      padding: 10px;
+      border-radius: 10px;
       margin-top: 10px;
+      font-size: 0.8rem;
+      text-align: left;
+      max-height: 150px;
+      overflow-y: auto;
+      pointer-events: auto;
     }
 
     .scanning #captureBtn {
       background: #555;
-      pointer-events: none;
     }
   </style>
 </head>
 
 <body>
   <a-scene webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers; overlayElement: #overlay;"
-    xr-mode-ui="enabled: true; XRMode: ar" renderer="colorManagement: true;" embedded>
-    <a-light type="ambient" intensity="0.5"></a-light>
-    <a-light type="directional" position="1 1 1" intensity="0.8"></a-light>
-    <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
-    <a-entity id="rightHand" hand-tracking-controls="hand: right;"></a-entity>
-
-    <a-entity id="uiContainer" position="0 1.5 -1.2">
-      <a-plane id="panel" color="#000" opacity="0.95" width="1.6" height="1.0" rounded="0.1">
-        <a-text id="statusText" value="DEBUG INITIALIZING" align="center" position="0 0.4 0.01" width="1.4"
-          color="#fbda61"></a-text>
-        <a-text id="resultText" value="Loading..." align="center" position="0 -0.05 0.01" width="1.4" wrap-count="40"
-          color="#fff"></a-text>
-        <a-plane color="#fbda61" width="1.4" height="0.005" position="0 0.3 0.02"></a-plane>
+    xr-mode-ui="enabled: true; XRMode: ar" embedded>
+    <a-entity id="uiContainer" position="0 1.5 -1.5">
+      <a-plane color="#000" width="2" height="1.2" opacity="0.9">
+        <a-text id="debugPanelText" value="DEBUG STARTING..." align="center" width="1.8" color="#ff0055"></a-text>
       </a-plane>
     </a-entity>
-
     <a-entity camera look-controls>
-      <a-entity cursor="fuse: false;" position="0 0 -1" geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
-        material="color: #fbda61; shader: flat; opacity: 0.8">
-      </a-entity>
+      <a-entity geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03" material="color: #ff0055; shader: flat"
+        position="0 0 -1"></a-entity>
     </a-entity>
   </a-scene>
 
   <div id="overlay">
-    <button id="captureBtn">スキャン実行</button><br>
-    <div id="uiStatusLabel">Initializing...</div>
+    <button id="captureBtn">スキャン(解析)実行</button>
+    <div id="debugLog">Initializing logs...</div>
     <video id="video" autoplay playsinline style="display: none;"></video>
     <canvas id="canvas" style="display: none;"></canvas>
   </div>
 
   <script>
-    // バージョン情報
-    const VERSION = "v1.2-debug";
+    const VERSION = "v1.5-final-debug";
     const GEMINI_API_KEY = '__API_KEY_PLACEHOLDER__';
     const GEMINI_MODEL = 'gemini-1.5-flash';
 
+    const debugLog = document.getElementById('debugLog');
+    const debugPanelText = document.getElementById('debugPanelText');
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
-    const captureBtn = document.getElementById('captureBtn');
-    const uiStatusLabel = document.getElementById('uiStatusLabel');
-    const statusText = document.getElementById('statusText');
-    const resultText = document.getElementById('resultText');
 
-    function updateStatus(msg) {
-      uiStatusLabel.innerText = msg;
-      statusText.setAttribute('value', msg.toUpperCase());
-    }
-
-    function logToPanel(msg) {
+    function log(msg) {
+      const div = document.createElement('div');
+      div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      debugLog.prepend(div);
+      debugPanelText.setAttribute('value', msg + "\n" + debugPanelText.getAttribute('value').substring(0, 500));
       console.log(msg);
-      const current = resultText.getAttribute('value');
-      resultText.setAttribute('value', msg + "\n" + current.substring(0, 200));
     }
 
-    async function initCamera() {
-      updateStatus("システム起動中 (" + VERSION + ")");
+    async function init() {
+      log(`APP VERSION: ${VERSION}`);
 
-      // キーの状態を詳細にチェック
-      let keyInfo = "";
+      // APIキーの注入判定
       if (GEMINI_API_KEY === '__API_KEY_PLACEHOLDER__') {
-        keyInfo = "【エラー】キーが注入されていません。deploy.ymlを確認してください。";
-      } else if (GEMINI_API_KEY.length < 10) {
-        keyInfo = "【エラー】キーが短すぎます。Secretsの入力内容を確認してください。";
+        log("【致命的エラー】APIキーが注入されていません。GitHub Actionsの設定またはデプロイ先のブランチ設定が間違っています。");
+      } else if (GEMINI_API_KEY.length < 5) {
+        log("【警告】APIキーが空または短すぎます: " + GEMINI_API_KEY);
       } else {
-        keyInfo = "キー注入成功: " + GEMINI_API_KEY.substring(0, 4) + "****" + GEMINI_API_KEY.slice(-4);
+        log("APIキー注入成功を確認: " + GEMINI_API_KEY.substring(0, 6) + "...");
       }
-
-      resultText.setAttribute('value', "DEBUG INFO:\n" + keyInfo + "\n\n手順:\n1. カメラ許可を出す\n2. スキャン実行を押す");
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         video.srcObject = stream;
-        updateStatus("準備完了");
-      } catch (err) {
-        updateStatus("カメラエラー");
-        logToPanel("CAMERA ERROR: " + err.message);
-      }
+        log("カメラ起動成功");
+      } catch (e) { log("カメラ失敗: " + e.message); }
     }
 
-    async function scanObject() {
+    async function scan() {
       if (document.body.classList.contains('scanning')) return;
       document.body.classList.add('scanning');
-
-      updateStatus("通信中...");
-      logToPanel("--- 解析開始 ---");
+      log("--- 解析リクエスト開始 ---");
 
       try {
         const context = canvas.getContext('2d');
         canvas.width = video.videoWidth || 640;
         canvas.height = video.videoHeight || 480;
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-        logToPanel("画像キャプチャ成功");
+        const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        log("画像キャプチャ完了");
 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-        const requestBody = {
-          contents: [{
-            parts: [
-              { text: "あなたはMRアシスタントです。画像に写っているものを日本語で3行以内で解説してください。" },
-              { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-            ]
-          }]
-        };
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+        log("Geminiに通信開始...");
 
-        logToPanel("Gemini APIに送信中...");
-        const response = await fetch(apiUrl, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        });
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: "これは何？日本語で1行で。" },
+                { inlineData: { mimeType: "image/jpeg", data: base64 } }
+              ]
+            }]
+          })
+        }).catch(err => { throw new Error("通信自体に失敗(オフライン/ブロック): " + err.message); });
 
         const data = await response.json();
-        logToPanel("レスポンス受信: HTTP " + response.status);
+        log(`レスポンス受信: HTTP ${response.status}`);
 
         if (!response.ok) {
-          const apiErr = data.error ? data.error.message : "詳細不明";
-          throw new Error(`APIエラー(${response.status}): ${apiErr}`);
+          const msg = data.error ? data.error.message : "詳細不明";
+          throw new Error(`APIエラー(${response.status}): ${msg}`);
         }
 
-        const aiResponse = data.candidates[0].content.parts[0].text;
-        updateStatus("解析成功");
-        resultText.setAttribute('value', aiResponse);
-      } catch (err) {
-        updateStatus("エラー発生");
-        logToPanel("ERROR: " + err.message);
+        log("解析成功: " + data.candidates[0].content.parts[0].text);
+      } catch (e) {
+        log("【エラー発生】: " + e.message);
       } finally {
         document.body.classList.remove('scanning');
       }
     }
 
-    captureBtn.addEventListener('click', scanObject);
-    AFRAME.registerComponent('input-listener', {
-      init: function () {
-        this.el.addEventListener('triggerdown', scanObject);
-        this.el.addEventListener('pinchstarted', scanObject);
-      }
-    });
-    document.addEventListener('DOMContentLoaded', () => {
-      const hands = document.querySelectorAll('[hand-tracking-controls]');
-      hands.forEach(h => h.setAttribute('input-listener', ''));
-      initCamera();
-    });
+    document.getElementById('captureBtn').addEventListener('click', scan);
+    document.addEventListener('DOMContentLoaded', init);
   </script>
 </body>
 
