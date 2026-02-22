@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="utf-8">
+  <title>Quest AI Vision (Auto-Deploy)</title>
+  <meta name="description" content="Quest 3 AI Passthrough App">
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <style>
+    #overlay {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      text-align: center;
+      pointer-events: none;
+      z-index: 10;
+      font-family: sans-serif;
+    }
+
+    #captureBtn {
+      padding: 15px 30px;
+      font-size: 1.2rem;
+      pointer-events: auto;
+      border-radius: 50px;
+      border: none;
+      background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+      color: white;
+      font-weight: bold;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    #captureBtn:active {
+      transform: translateX(-50%) scale(0.95);
+    }
+
+    .scanning #captureBtn {
+      background: #ccc;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- A-Frame Scene -->
+  <a-scene webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers; overlayElement: #overlay;"
+    xr-mode-ui="enabled: true; XRMode: ar" renderer="colorManagement: true;" embedded>
+    <a-light type="ambient" intensity="0.5"></a-light>
+    <a-light type="directional" position="1 1 1" intensity="0.8"></a-light>
+    <a-entity id="leftHand" hand-tracking-controls="hand: left;"></a-entity>
+    <a-entity id="rightHand" hand-tracking-controls="hand: right;"></a-entity>
+    <a-entity id="uiContainer" position="0 1.5 -1">
+      <a-plane id="panel" color="#1a1a1a" opacity="0.8" width="1.2" height="0.6" rounded="0.05">
+        <a-text id="statusText" value="分析したいものを中心に捉えてください" align="center" position="0 0.15 0.01" width="1.1"
+          color="#00f2fe"></a-text>
+        <a-text id="resultText" value="スキャンを開始するとAIが回答を表示します" align="center" position="0 -0.05 0.01" width="1.0"
+          wrap-count="30"></a-text>
+      </a-plane>
+    </a-entity>
+    <a-entity camera look-controls>
+      <a-entity id="reticle" position="0 0 -1" geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
+        material="color: #00f2fe; shader: flat; opacity: 0.5"></a-entity>
+    </a-entity>
+  </a-scene>
+
+  <div id="overlay">
+    <button id="captureBtn">スキャン開始</button>
+    <video id="video" autoplay playsinline style="display: none;"></video>
+    <canvas id="canvas" style="display: none;"></canvas>
+  </div>
+
+  <script>
+    // デプロイ時に GitHub Actions がここを本物のキーに書き換えます
+    const GEMINI_API_KEY = '__API_KEY_PLACEHOLDER__';
+    const GEMINI_MODEL = 'gemini-1.5-flash';
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const captureBtn = document.getElementById('captureBtn');
+    const statusText = document.getElementById('statusText');
+    const resultText = document.getElementById('resultText');
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 } },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (err) { updateStatus("カメラ接続エラー"); }
+    }
+
+    function updateStatus(msg) { statusText.setAttribute('value', msg); }
+
+    async function scanObject() {
+      if (GEMINI_API_KEY.startsWith('__')) {
+        alert("GitHub Secretsの設定が完了していません。手順を確認してください。");
+        return;
+      }
+      if (document.body.classList.contains('scanning')) return;
+
+      document.body.classList.add('scanning');
+      updateStatus("分析中...");
+
+      const context = canvas.getContext('2d');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+      const requestBody = {
+        contents: [{
+          parts: [
+            { text: "あなたはMRアシスタントです。画像に写っているものを日本語で3行以内で解説してください。" },
+            { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+          ]
+        }]
+      };
+
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        const aiResponse = data.candidates[0].content.parts[0].text;
+        updateStatus("解析完了");
+        resultText.setAttribute('value', aiResponse);
+      } catch (err) {
+        updateStatus("エラー");
+        resultText.setAttribute('value', "APIキーが無効、または分析に失敗しました。");
+      } finally { document.body.classList.remove('scanning'); }
+    }
+
+    captureBtn.addEventListener('click', scanObject);
+    AFRAME.registerComponent('input-listener', {
+      init: function () {
+        this.el.addEventListener('triggerdown', scanObject);
+        this.el.addEventListener('pinchstarted', scanObject);
+      }
+    });
+    document.addEventListener('DOMContentLoaded', () => {
+      const hands = document.querySelectorAll('[hand-tracking-controls]');
+      hands.forEach(h => h.setAttribute('input-listener', ''));
+      initCamera();
+    });
+  </script>
+</body>
+
+</html>
