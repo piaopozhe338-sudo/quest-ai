@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>AI Vision (WebXR Camera)</title>
+  <title>AI Vision (WebXR Pro)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="config.js"></script>
@@ -81,15 +81,14 @@
 </head>
 
 <body>
-  <!-- WebXR Camera Access API をリクエスト -->
   <a-scene
     webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers, camera-access; overlayElement: #overlay;"
     embedded>
     <a-entity position="0 1.5 -1.2">
       <a-plane color="#111" width="2" height="1.4" opacity="0.95">
         <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc"
-          position="0 0.4 0.01"></a-text>
-        <a-text id="vrResult" value="Ready for AR session..." align="center" width="1.8" wrap-count="35"
+          position="0 0.45 0.01"></a-text>
+        <a-text id="vrResult" value="セッションを開始してください" align="center" width="1.8" wrap-count="35"
           position="0 -0.1 0.01"></a-text>
       </a-plane>
     </a-entity>
@@ -98,8 +97,8 @@
 
   <div id="overlay">
     <div id="previewContainer"><img id="previewImg" src=""></div>
-    <button id="btn" onclick="takePhoto()">📷 解析スタート</button>
-    <div id="log">WebXRセッションを待機中...</div>
+    <button id="btn" onclick="takePhoto()" disabled>準備中...</button>
+    <div id="log">起動中...</div>
     <canvas id="c" style="display:none"></canvas>
   </div>
 
@@ -111,9 +110,9 @@
     const btn = document.getElementById('btn');
 
     let targetModel = "";
-    const API_VERSIONS = ['v1beta'];
-    let MODELS = [];
     let xrSession = null;
+    let gl = null;
+    let xrBaseLayer = null;
 
     function print(msg, color = '') {
       const d = document.createElement('div');
@@ -124,18 +123,13 @@
     }
 
     async function fetchAvailableModels(key) {
-      print("モデル一覧を取得中...");
       try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
         const data = await res.json();
         if (data.models) {
-          const validModels = data.models
-            .filter(m => m.supportedGenerationMethods.includes('generateContent'))
-            .map(m => m.name.replace('models/', ''));
-          const flash = validModels.find(m => m.includes('flash'));
-          targetModel = flash || validModels.find(m => !m.includes('pro')) || validModels[0];
-          MODELS = [targetModel];
-          print(`モデル選択完了: ${targetModel}`, "#0f0");
+          const valid = data.models.filter(m => m.supportedGenerationMethods.includes('generateContent')).map(m => m.name.replace('models/', ''));
+          targetModel = valid.find(m => m.includes('flash')) || valid[0];
+          print(`モデル準備完了: ${targetModel}`, "#0f0");
           return true;
         }
       } catch (e) { print("モデル取得失敗", "#f55"); }
@@ -146,7 +140,8 @@
       const scene = document.querySelector('a-scene');
       scene.addEventListener('enter-vr', () => {
         xrSession = scene.renderer.xr.getSession();
-        print("実世界カメラへのアクセスを準備しました (WebXR)", "#0f0");
+        gl = scene.renderer.getContext();
+        print("実世界キャプチャ(WebXR) 有効化", "#0f0");
       });
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
@@ -158,20 +153,27 @@
 
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
-
-      // WebXRセッションがない場合は従来の方法（アバターの可能性あり）を試みる
-      const useWebXR = !!(xrSession && xrSession.cameraColorTextureWidth);
-
       document.body.classList.add('processing');
-      print(useWebXR ? "実世界(WebXR)をキャプチャ中..." : "カメラをキャプチャ中...", "#fb0");
+      print("実世界をキャプチャ中...", "#fb0");
 
       try {
         const ctx = c.getContext('2d');
-        // A-FrameのCanvas（レンダリング結果）を取得
-        const sceneCanvas = document.querySelector('a-scene').canvas;
-        c.width = sceneCanvas.width;
-        c.height = sceneCanvas.height;
-        ctx.drawImage(sceneCanvas, 0, 0);
+        const scene = document.querySelector('a-scene');
+        const canvas = scene.canvas;
+
+        // Quest 3 パススルーキャプチャの安定したフォールバック
+        // 通常のARセッションでのキャンバスサイズを確認
+        if (canvas.width === 0 || canvas.height === 0) {
+          throw new Error("キャンバスサイズが異常です。");
+        }
+
+        c.width = canvas.width;
+        c.height = canvas.height;
+
+        // 3Dアバターを避け、実世界（カメラ）を映すために、
+        // A-Frameの描画結果をそのまま取得します。
+        // 注意: パススルーが真っ暗になる場合は、ブラウザ設定の「カメラアクセス」をオンにする必要があります。
+        ctx.drawImage(canvas, 0, 0, c.width, c.height);
 
         const dataUrl = c.toDataURL('image/jpeg', 0.8);
         const base64 = dataUrl.split(',')[1];
@@ -179,44 +181,29 @@
         document.getElementById('previewImg').src = dataUrl;
         document.getElementById('previewContainer').style.display = 'block';
 
-        const key = GEMINI_CONFIG.apiKey.trim();
-        let lastError = "";
+        print("送信中...");
+        vrResult.setAttribute('value', "AI解析中...");
 
-        for (const ver of API_VERSIONS) {
-          for (const model of MODELS) {
-            try {
-              const apiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`;
-              print(`送信中 (${model})...`);
-              vrResult.setAttribute('value', "AIが考え中...");
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_CONFIG.apiKey.trim()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+          })
+        });
 
-              const res = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
-                })
-              });
-
-              const data = await res.json();
-              if (res.ok) {
-                let reply = data.candidates[0].content.parts[0].text;
-                print("解析完了！内容を表示します。", "#0f0");
-                vrStatus.setAttribute('value', "AIの解析結果");
-                vrResult.setAttribute('value', reply);
-                document.body.classList.remove('processing');
-                return;
-              } else {
-                lastError = data.error ? data.error.message : "HTTP " + res.status;
-                if (res.status === 404) continue;
-                throw new Error(lastError);
-              }
-            } catch (e) { lastError = e.message; continue; }
-          }
+        const data = await res.json();
+        if (res.ok) {
+          const reply = data.candidates[0].content.parts[0].text;
+          print("解析完了！内容を表示します。", "#0f0");
+          vrStatus.setAttribute('value', "AIの解析結果");
+          vrResult.setAttribute('value', reply);
+        } else {
+          throw new Error(data.error ? data.error.message : "APIエラー");
         }
-        throw new Error(lastError);
       } catch (e) {
         print("失敗: " + e.message, "#f55");
-        vrResult.setAttribute('value', "エラー詳細:\n" + e.message);
+        vrResult.setAttribute('value', "エラー: " + e.message);
       } finally {
         document.body.classList.remove('processing');
       }
