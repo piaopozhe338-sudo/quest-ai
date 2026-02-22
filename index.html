@@ -233,6 +233,7 @@
   </div>
 
   <script>
+    // === DOM要素の取得 ===
     const logEl = document.getElementById('log');
     const answerBox = document.getElementById('answerBox');
     const vrStatus = document.getElementById('vrStatus');
@@ -240,12 +241,13 @@
     const c = document.getElementById('c');
     const micBtn = document.getElementById('micBtn');
 
+    // === グローバル変数 ===
     let targetModel = "";
     let availableModels = [];
     let isRecording = false;
     let recordedText = "";
     let recognition = null;
-    let sceneEl;
+    let sceneEl = null;
     let recordStartTime = 0;
     let tempImageBase64 = "";
 
@@ -298,15 +300,25 @@
     }
 
     function print(msg, color = '') {
-      const d = document.createElement('div');
-      d.style.color = color;
-      d.style.marginBottom = '2px';
-      d.innerHTML = msg;
-      logEl.appendChild(d);
-      // ログを常に最新（一番下）にスクロール
-      logEl.scrollTop = logEl.scrollHeight;
-      vrStatus.setAttribute('value', msg.replace(/<[^>]*>?/gm, ''));
+      try {
+        if (!logEl) return;
+        const d = document.createElement('div');
+        d.style.color = color;
+        d.style.marginBottom = '2px';
+        d.innerHTML = msg;
+        logEl.appendChild(d);
+        logEl.scrollTop = logEl.scrollHeight;
+        if (vrStatus) vrStatus.setAttribute('value', msg.replace(/<[^>]*>?/gm, ''));
+      } catch (e) {
+        console.error("Print Error:", e);
+      }
     }
+
+    // 実行時エラーのログ表示
+    window.onerror = function (msg, url, lineNo, columnNo, error) {
+      print(`🚨 JSエラー: ${msg} (L${lineNo})`, "#f55");
+      return false;
+    };
 
     // ====== 追加: 音声認識の初期設定 ======
     function initSpeechRecognition() {
@@ -512,7 +524,7 @@
       wakeupSpeech(); // ページロード時にもウォームアップ
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
-        print(`ビルド: 2026-02-23 03:45 (Audio Diagnosis v9)`);
+        print(`ビルド: 2026-02-23 03:55 (Bug Fix v9.1)`);
         const success = await fetchAvailableModels(GEMINI_CONFIG.apiKey.trim());
         if (success) btn.disabled = false;
       }
