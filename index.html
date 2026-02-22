@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>AI Vision (Fixed Capture)</title>
+  <title>AI Vision (Fixed AR Capture)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="config.js"></script>
@@ -110,7 +110,7 @@
     const btn = document.getElementById('btn');
 
     let targetModel = "";
-    let xrSession = null;
+    let sceneEl = null;
 
     function print(msg, color = '') {
       const d = document.createElement('div');
@@ -135,10 +135,9 @@
     }
 
     window.onload = async () => {
-      const scene = document.querySelector('a-scene');
-      scene.addEventListener('enter-vr', () => {
-        xrSession = scene.renderer.xr.getSession();
-        print("実世界キャプチャ 有効化", "#0f0");
+      sceneEl = document.querySelector('a-scene');
+      sceneEl.addEventListener('enter-vr', () => {
+        print("実世界キャプチャ 有効化 (AR)", "#0f0");
       });
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
@@ -151,13 +150,16 @@
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
 
-      const scene = document.querySelector('a-scene');
-      // A-Frameのrendererから現在のキャンバスを取得
-      const renderer = scene.renderer;
-      const canvas = renderer.domElement;
+      // 重要: a-scene エンティティから renderer と canvas を取得
+      const renderer = sceneEl.renderer;
+      if (!renderer) {
+        print("エラー: レンダラーが準備できていません", "#f55");
+        return;
+      }
 
-      if (!canvas || canvas.width <= 0 || canvas.height <= 0) {
-        print("エラー: キャンバスが正しく生成されていません。ARモードに入っていますか？", "#f55");
+      const canvas = renderer.domElement;
+      if (!canvas || canvas.width <= 1 || canvas.height <= 1) {
+        print("エラー: キャンバスが見つからないかサイズが異常です", "#f55");
         return;
       }
 
@@ -165,11 +167,16 @@
       print(`実世界を解析中... (${canvas.width}x${canvas.height})`, "#fb0");
 
       try {
+        // A-Frame/Three.js の描画完了を待ってからキャプチャするための措置
+        // preserveDrawingBuffer:true が設定されていない場合、通常は
+        // レンダリング直後でないと内容が消えてしまうため A-Frame の render イベントに頼るか
+        // 直接描画後に呼び出す必要があります。
         const ctx = c.getContext('2d');
-        c.width = 1024; // 固定解像度でキャプチャ
+        c.width = 1024;
         c.height = Math.round(1024 * (canvas.height / canvas.width));
 
-        // ARフレームの描画（パススルー背景込み）を取得
+        // Quest の WebXR セッション中の描画を取得
+        renderer.render(sceneEl.object3D, sceneEl.camera);
         ctx.drawImage(canvas, 0, 0, c.width, c.height);
 
         const dataUrl = c.toDataURL('image/jpeg', 0.8);
