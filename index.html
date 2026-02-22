@@ -220,6 +220,9 @@
       <button id="btn" class="action-btn" onclick="takePhoto()" disabled>📷 VRキャプチャ</button>
       <label id="uploadBtnLabel" class="action-btn upload-btn" for="fileInput">📁 写真を選択 (推奨)</label>
       <input type="file" id="fileInput" accept="image/jpeg, image/png">
+      <!-- 追加: 音声入力ボタン -->
+      <button id="micBtn" class="action-btn" style="background:#ff5555; color:#fff;" onclick="toggleMic()">🎤
+        音声で質問</button>
     </div>
     <div id="log">
       起動中...<br>
@@ -235,19 +238,129 @@
     const vrStatus = document.getElementById('vrStatus');
     const vrResult = document.getElementById('vrResult');
     const c = document.getElementById('c');
-    const btn = document.getElementById('btn');
-    const fileInput = document.getElementById('fileInput');
+    const micBtn = document.getElementById('micBtn');
 
     let targetModel = "";
-    let availableModels = []; // 追加: フォールバック用のモデル一覧
+    let availableModels = [];
     let sceneEl = null;
+
+    // ====== 追加: 音声関係の変数 ======
+    let recognition = null;
+    let isRecording = false;
+    let recordedText = ""; // ユーザーが発話した内容を保持
+    let tempImageBase64 = ""; // 音声質問開始時に裏で撮る写真データ
 
     function print(msg, color = '') {
       const d = document.createElement('div');
       if (color) d.style.color = color;
-      d.innerHTML = `> ${msg}`; // innerHTML to allow basic tags
+      d.innerHTML = `> ${msg}`;
       logEl.prepend(d);
       vrStatus.setAttribute('value', msg.replace(/<[^>]*>?/gm, ''));
+    }
+
+    // ====== 追加: 音声認識の初期設定 ======
+    function initSpeechRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        print("このブラウザは音声認識に非対応です", "#f55");
+        micBtn.style.display = 'none';
+        return;
+      }
+
+      recognition = new SpeechRecognition();
+      recognition.lang = 'ja-JP';
+      recognition.interimResults = false; // 確定した結果のみ取得
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = function () {
+        isRecording = true;
+        micBtn.innerHTML = '🛑 録音停止 (発話中...)';
+        micBtn.style.background = '#ff0000';
+        print("マイク録音中... 話しかけてください", "#0f0");
+        vrResult.setAttribute('value', "録音中... (終わったら停止ボタン)");
+      };
+
+      recognition.onresult = function (event) {
+        recordedText = event.results[0][0].transcript;
+        print(`🎤 あなたの質問: "${recordedText}"`, "#0f0");
+      };
+
+      recognition.onerror = function (event) {
+        print(`マイクエラー: ${event.error}`, "#f55");
+        resetMicBtn();
+      };
+
+      recognition.onend = function () {
+        resetMicBtn();
+        if (recordedText && tempImageBase64) {
+          vrResult.setAttribute('value', "質問と画像を送信中...");
+          sendToAI(tempImageBase64); // 自動で送信
+        } else if (recordedText) {
+          vrResult.setAttribute('value', "質問を受け付けました。手動で解析してください。");
+        }
+      };
+    }
+
+    function resetMicBtn() {
+      isRecording = false;
+      micBtn.innerHTML = '🎤 音声で質問';
+      micBtn.style.background = '#ff5555';
+    }
+
+    async function toggleMic() {
+      if (!recognition) return;
+      if (isRecording) {
+        recognition.stop();
+      } else {
+        recordedText = "";
+        tempImageBase64 = ""; // リセット
+
+        // 裏でこっそりVRキャプチャを撮っておく
+        tempImageBase64 = captureVRImage();
+
+        if (!tempImageBase64) {
+          print("カメラのキャプチャに失敗しました。写真を選択してください。", "#f55");
+          return;
+        }
+
+        recognition.start();
+      }
+    }
+
+    // ====== キャプチャ処理の共通化 ======
+    function captureVRImage() {
+      answerBox.style.display = 'none'; // 新しいキャプチャで一旦隠す
+      const renderer = sceneEl.renderer;
+      if (!renderer) return null;
+
+      const canvas = renderer.domElement;
+      if (!canvas || canvas.width <= 1 || canvas.height <= 1) return null;
+
+      const ctx = c.getContext('2d');
+      c.width = 1024;
+      c.height = Math.round(1024 * (canvas.height / canvas.width));
+
+      renderer.render(sceneEl.object3D, sceneEl.camera);
+      ctx.drawImage(canvas, 0, 0, c.width, c.height);
+
+      const dataUrl = c.toDataURL('image/jpeg', 0.8);
+      document.getElementById('previewImg').src = dataUrl;
+      document.getElementById('previewContainer').style.display = 'block';
+
+      return dataUrl.split(',')[1];
+    }
+
+    // ====== 追加: 音声合成 (読み上げ) ======
+    function speakText(text) {
+      if (!window.speechSynthesis) return;
+      // 現在喋っているものがあればキャンセル
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ja-JP';
+      utterance.rate = 1.2; // 少し早口ぎみ
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
     }
 
     async function fetchAvailableModels(key) {
@@ -271,6 +384,8 @@
       sceneEl.addEventListener('enter-vr', () => {
         print("ARモード開始（Quest仕様の制限に注意）", "#0f0");
       });
+
+      initSpeechRecognition(); // 音声認識の初期化
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
         print(`ビルド: ${GEMINI_CONFIG.buildTime}`);
@@ -308,11 +423,18 @@
       print("AI送信中 (複数モデルで試行)...");
       vrResult.setAttribute('value', "AIに接続しています...");
 
+      // 音声質問があるかどうかでプロンプトを切り替え
+      let userInstruction = "ユーザーがアップロードした画像を見て、写っているメインの物体・商品（複数でも可）を特定してください。";
+      if (recordedText) {
+        userInstruction = `画像を見て、ユーザーからの次の質問「${recordedText}」に答えてください。また、画像内に写っている商品も特定してください。`;
+      }
+
       const promptText = `
-あなたは優秀な画像解析アシスタントです。ユーザーがアップロードした画像を見て、写っているメインの物体・商品（複数でも可）を特定してください。
+あなたは優秀な画像解析アシスタントです。${userInstruction}
 以下の厳密なJSON形式で出力してください。Markdownのコードブロック構文(\`\`\`json)等は一切含めず、純粋なJSON文字列だけを返してください。
 
 {
+  "answerText": "質問に対する口語での回答（音声で読み上げるための、相槌を含む短い文章。質問がない場合はAIからの挨拶や気づきのみ）",
   "description": "画像の簡単な説明（日本語2〜3行）",
   "products": [
     {
@@ -357,9 +479,18 @@
             print("解析完了！回答を表示します。", "#0f0");
             print(`💬 ${aiResult.description.substring(0, 20)}...`, "#0f0");
 
+            // ===== 追加: 返答テキストの音声読み上げ =====
+            if (aiResult.answerText) {
+              speakText(aiResult.answerText);
+            }
+
             answerBox.style.display = 'block';
 
-            let htmlContent = `<strong>【AIの解析結果 (${currentModel.replace("-flash", "")})】</strong><br><br>${aiResult.description.replace(/\\n/g, '<br>')}`;
+            let htmlContent = ``;
+            if (aiResult.answerText) {
+              htmlContent += `<div style="color: #0ff; margin-bottom: 10px;">🎤 <strong>AI:</strong> ${aiResult.answerText}</div>`;
+            }
+            htmlContent += `<strong>【AIの解析結果 (${currentModel.replace("-flash", "")})】</strong><br><br>${aiResult.description.replace(/\\n/g, '<br>')}`;
 
             if (aiResult.products && aiResult.products.length > 0) {
               htmlContent += `
@@ -466,45 +597,21 @@
         vrResult.setAttribute('value', "エラー: 全モデル使用不可");
       }
 
+      // 解析が終わった・失敗したため、質問テキストをリセット
+      recordedText = "";
       document.body.classList.remove('processing');
     }
 
-    // ====== VRキャプチャ処理 (制限あり) ======
+    // ====== 手動・VRキャプチャ処理 (※音声なしの単体実行用) ======
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
-      answerBox.style.display = 'none'; // 新しいキャプチャで一旦隠す
+      print(`VRキャプチャ実行中...`, "#fb0");
 
-      const renderer = sceneEl.renderer;
-      if (!renderer) {
-        print("エラー: レンダラーが準備できていません", "#f55");
-        return;
-      }
-
-      const canvas = renderer.domElement;
-      if (!canvas || canvas.width <= 1 || canvas.height <= 1) {
-        print("エラー: Questのプライバシー保護により、カメラピクセルがブロックされています。「写真を選択」を試してください。", "#f55");
-        return;
-      }
-
-      print(`VRキャプチャを試行中... ※Quest仕様で真っ暗になる可能性があります`, "#fb0");
-
-      try {
-        const ctx = c.getContext('2d');
-        c.width = 1024;
-        c.height = Math.round(1024 * (canvas.height / canvas.width));
-
-        renderer.render(sceneEl.object3D, sceneEl.camera);
-        ctx.drawImage(canvas, 0, 0, c.width, c.height);
-
-        const dataUrl = c.toDataURL('image/jpeg', 0.8);
-        const base64 = dataUrl.split(',')[1];
-
-        document.getElementById('previewImg').src = dataUrl;
-        document.getElementById('previewContainer').style.display = 'block';
-
+      const base64 = captureVRImage();
+      if (base64) {
         await sendToAI(base64);
-      } catch (e) {
-        print("キャプチャ失敗: プライバシー制限の可能性があります。「写真を選択」を利用してください。", "#f55");
+      } else {
+        print("エラー: Questのプライバシー制限がかかっている可能性があります。「写真を選択」を試してください。", "#f55");
       }
     }
   </script>
