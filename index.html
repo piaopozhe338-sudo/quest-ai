@@ -117,15 +117,15 @@
 
           print(`利用可能モデル数: ${validModels.length}個`, "#0ff");
 
-          // flash または pro を優先して探す
-          const flash = validModels.find(m => m.includes('flash') && m.includes('1.5'));
-          const pro = validModels.find(m => m.includes('pro') && m.includes('1.5'));
-          const anyPro = validModels.find(m => m.includes('pro'));
+          // 【重要】ProモデルはQuota（課金制限）に引っかかりやすいため、意図的に除外して軽量なFlashを選ぶ
+          // gemini-1.5-flash または gemini-2.0-flash など、確実に動作するモデルを探す
+          const flash = validModels.find(m => m.includes('flash'));
 
-          targetModel = flash || pro || anyPro || validModels[0];
+          // Flashが見つかればそれ、なければ（仕方なく）リストの先頭を使うが、Proは避ける
+          targetModel = flash || validModels.find(m => !m.includes('pro')) || validModels[0];
 
-          print(`✅ 最適なモデルを自動選択: ${targetModel}`, "#0f0");
-          vrResult.setAttribute('value', `使用モデル:\n${targetModel}\nスキャンを実行してください`);
+          print(`✅ 最適なモデル(軽量)を自動選択: ${targetModel}`, "#0f0");
+          vrResult.setAttribute('value', `使用モデル:\n${targetModel}\n準備完了です`);
           return true;
         } else {
           print("利用可能なモデルが1つも見つかりません。", "#f55");
