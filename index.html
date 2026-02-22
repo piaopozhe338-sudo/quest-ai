@@ -362,46 +362,52 @@
     async function toggleMic() {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) return;
-      if (isRecording) {
-        // 即座にUIを戻して停止命令を出す
-        resetMicBtn();
-        if (recognition) recognition.stop();
-      } else {
-        recordedText = "";
-        tempImageBase64 = ""; // リセット
 
-        // クエストブラウザのマイク権限を明示的に要求/確認する
+      if (isRecording) {
+        resetMicBtn();
+        if (recognition) {
+          try { recognition.abort(); } catch (e) { }
+        }
+      } else {
+        // 連続クリック防止
+        if (document.body.classList.contains('mic-initializing')) return;
+        document.body.classList.add('mic-initializing');
+
+        recordedText = "";
+        tempImageBase64 = "";
+
         try {
-          print("💡 マイク権限を確認中...", "#aaa");
+          print("💡 マイクを準備しています...", "#aaa");
           await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e) {
-          print("⚠️ マイク権限エラー: 「許可」してください", "#f55");
+          print("⚠️ マイク許可が必要です", "#f55");
+          document.body.classList.remove('mic-initializing');
           return;
         }
 
-        initSpeechRecognition(); // 毎回クリーンなインスタンスを作る
+        initSpeechRecognition();
 
-        // UIを即座に「録音中」に切り替える（APIの起動ラグを隠すため）
         isRecording = true;
         micBtn.innerHTML = '🛑 録音停止 (発話中...)';
         micBtn.style.background = '#ff0000';
-        print("🎤 録音開始! 喋ってください", "#0f0");
-        vrResult.setAttribute('value', "録音中... (終わったら停止)");
+        print("🎤 録音開始！", "#0f0");
+        vrResult.setAttribute('value', "録音中...");
 
-        // 裏でこっそりVRキャプチャを撮っておく
         tempImageBase64 = captureVRImage();
 
-        if (!tempImageBase64) {
-          print("⚠️ VR画像取得不可 (音声のみ記録)", "#fb0");
-        }
-
         recordStartTime = Date.now();
-        try {
-          recognition.start();
-        } catch (e) {
-          print(`⚠️ 録音エラー: ${e.message}`, "#f55");
-          resetMicBtn();
-        }
+
+        // aborted エラー対策：前のプロセスが完全に消えるのを待ってから開始する
+        setTimeout(() => {
+          try {
+            recognition.start();
+          } catch (e) {
+            print(`⚠️ 録音エラー: ${e.message}`, "#f55");
+            resetMicBtn();
+          } finally {
+            document.body.classList.remove('mic-initializing');
+          }
+        }, 150); // 150msの待機
       }
     }
 
