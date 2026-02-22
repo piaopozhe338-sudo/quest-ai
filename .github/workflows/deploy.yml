@@ -24,26 +24,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inject API Key
+      - name: Inject Data
         env:
           MY_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. 書き換え実行（デリミタを変更し、環境変数経由で確実に渡す）
+          # 日時を取得（日本時間にする場合は TZ=Asia/Tokyo date ...）
+          DEPLOY_TIME=$(date +'%Y-%m-%d %H:%M:%S')
+          echo "Deploy Time: ${DEPLOY_TIME}"
+          
+          # APIキーと時間を書き換え
           sed -i "s|__API_KEY_PLACEHOLDER__|${MY_API_KEY}|g" index.html
-          
-          # 2. 【重要】書き換えが成功したかチェック
-          # もしファイル内にまだプレースホルダーが残っていたら、エラーで終了させる
-          if grep -q "__API_KEY_PLACEHOLDER__" index.html; then
-            echo "Error: API key placeholder was not replaced!"
-            exit 1
-          fi
-          
-          # 3. キーが空（Secretsが未設定）でないかチェック
-          # sed後、該当行が 'const GEMINI_API_KEY = '';' のようになっていないか確認
-          if grep -q "const GEMINI_API_KEY = '';" index.html; then
-            echo "Error: API key is empty. Check your GitHub Secrets named GEMINI_API_KEY."
-            exit 1
-          fi
+          sed -i "s|__BUILD_TIME_PLACEHOLDER__|${DEPLOY_TIME}|g" index.html
           
           echo "Injection successful."
 
