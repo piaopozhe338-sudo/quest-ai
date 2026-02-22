@@ -322,17 +322,22 @@
         let duration = Date.now() - recordStartTime;
         print(`💡 録音終了 (約${Math.round(duration / 1000)}秒)`, "#aaa");
 
-        if (recordedText && tempImageBase64) {
+        // 修正: 録音したテキストが空でも、画像(tempImageBase64)があれば送信を試みる
+        if (tempImageBase64) {
           vrResult.setAttribute('value', "解析中...");
-          print(`🎤 送信: "${recordedText}"`, "#0f0");
-          sendToAI(tempImageBase64); // 自動で送信
+          if (recordedText) {
+            print(`🎤 送信質問: "${recordedText}"`, "#0f0");
+          } else {
+            print("💡 音声は聞き取れませんでしたが、画像を解析します", "#aaa");
+          }
+          sendToAI(tempImageBase64);
         } else if (recordedText) {
+          // 画像がない場合は、以前の仕様どおり「写真待ち」にする
           vrResult.setAttribute('value', "質問受付。写真待ち...");
-          print(`🎤 確定: "${recordedText}"`, "#0f0");
-          // 停止時にもう一度ログに出してあげる
+          print(`🎤 質問確定: "${recordedText}"`, "#0f0");
           print(`👉 このまま「写真を選択」で送信されます`, "#0ff");
         } else {
-          print(`⚠️ 内容が空でした。マイク許可と音量を確認してください。`, "#fb0");
+          print(`⚠️ 入力がありませんでした。`, "#fb0");
           vrResult.setAttribute('value', "入力なし");
         }
       };
@@ -437,14 +442,29 @@
     // ====== 追加: 音声合成 (読み上げ) ======
     function speakText(text) {
       if (!window.speechSynthesis) return;
-      // 現在喋っているものがあればキャンセル
+      // 読み上げキャンセル
       window.speechSynthesis.cancel();
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'ja-JP';
-      utterance.rate = 1.2; // 少し早口ぎみ
+      utterance.rate = 1.2;
       utterance.pitch = 1.0;
+
+      // キューが消えないバグ対策
+      const timer = setInterval(() => {
+        if (!window.speechSynthesis.speaking) {
+          clearInterval(timer);
+        }
+      }, 500);
+
       window.speechSynthesis.speak(utterance);
+    }
+
+    // 起動時に音声合成を初期化（空のテキストでキック）
+    function wakeupSpeech() {
+      if (!window.speechSynthesis) return;
+      const u = new SpeechSynthesisUtterance("");
+      window.speechSynthesis.speak(u);
     }
 
     async function fetchAvailableModels(key) {
@@ -467,9 +487,11 @@
       sceneEl = document.querySelector('a-scene');
       sceneEl.addEventListener('enter-vr', () => {
         print("ARモード開始（Quest仕様の制限に注意）", "#0f0");
+        wakeupSpeech(); // VR開始時に音声をウォームアップ
       });
 
       initSpeechRecognition(); // 音声認識の初期化
+      wakeupSpeech(); // ページロード時にもウォームアップ
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
         print(`ビルド: 2026-02-23 02:50 (Diagnostic v4)`);
