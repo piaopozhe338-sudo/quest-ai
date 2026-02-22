@@ -329,29 +329,45 @@
       micBtn.style.background = '#ff5555';
     }
 
+    let isProcessing = false;
+
     function toggleMic() {
+      if (isProcessing) return;
+      isProcessing = true;
+
       if (!recognition) {
         initSpeechRecognition();
-        if (!recognition) return;
+        if (!recognition) {
+          isProcessing = false;
+          return;
+        }
       }
 
-      if (isRecording) {
-        try { recognition.stop(); } catch (e) { }
-        resetMicBtn();
-      } else {
-        recordedText = "";
-        tempImageBase64 = "";
-        recordStartTime = Date.now();
+      try {
+        if (isRecording) {
+          print("💡 録音を停止します...", "#aaa");
+          recognition.stop();
+        } else {
+          recordedText = "";
+          tempImageBase64 = "";
+          recordStartTime = Date.now();
 
-        // 徹底：クリックイベント内で「即座に」start()を呼ぶ。setTimeout等も挟まない。
-        try {
+          // すでに動いている可能性を考慮して一度強制終了
+          try { recognition.abort(); } catch (e) { }
+
+          // UIを即座に「起動準備中」風にする
+          micBtn.innerHTML = '⌛ 準備中...';
+          micBtn.style.background = '#888';
+
+          // ユーザージェスチャから直接起動
           recognition.start();
-          // 認識エンジンの起動を邪魔しないよう、キャプチャは起動後に回す
           tempImageBase64 = captureVRImage();
-        } catch (e) {
-          print(`⚠️ 起動失敗: ${e.message}`, "#f55");
-          resetMicBtn();
         }
+      } catch (e) {
+        print(`⚠️ 処理失敗: ${e.message}`, "#f55");
+        resetMicBtn();
+      } finally {
+        isProcessing = false;
       }
     }
 
@@ -452,7 +468,7 @@
       wakeupSpeech(); // ページロード時にもウォームアップ
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
-        print(`ビルド: 2026-02-23 03:15 (Direct Start v6)`);
+        print(`ビルド: 2026-02-23 03:25 (Safe State v7)`);
         const success = await fetchAvailableModels(GEMINI_CONFIG.apiKey.trim());
         if (success) btn.disabled = false;
       }
