@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>AI Vision (Auto-Repair Ver)</title>
+  <title>AI Vision (Auto-Select Model)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="config.js"></script>
@@ -33,20 +33,21 @@
     #btn {
       padding: 20px 40px;
       font-size: 22px;
-      background: #00ffcc;
+      background: #ff9f43;
       border: none;
       border-radius: 50px;
       font-weight: bold;
       cursor: pointer;
       pointer-events: auto;
       box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4);
+      border: 2px solid #fff;
     }
 
     #log {
       background: rgba(0, 0, 0, 0.9);
       color: #fff;
       width: 85%;
-      max-height: 180px;
+      max-height: 200px;
       overflow-y: auto;
       margin-top: 15px;
       padding: 12px;
@@ -54,7 +55,7 @@
       font-size: 13px;
       text-align: left;
       pointer-events: auto;
-      border: 1px solid #00ffcc;
+      border: 1px solid #ff9f43;
     }
   </style>
 </head>
@@ -62,10 +63,10 @@
 <body>
   <a-scene webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers; overlayElement: #overlay;" embedded>
     <a-entity position="0 1.5 -1.2">
-      <a-plane color="#111" width="2" height="1.2" opacity="0.95">
-        <a-text id="vrStatus" value="AI VISION READY" align="center" width="1.8" color="#00ffcc"
-          position="0 0.35 0.01"></a-text>
-        <a-text id="vrResult" value="環境を認識中..." align="center" width="1.8" wrap-count="35"
+      <a-plane color="#111" width="2" height="1.4" opacity="0.95">
+        <a-text id="vrStatus" value="AI VISION (AUTO MODEL)" align="center" width="1.8" color="#ff9f43"
+          position="0 0.4 0.01"></a-text>
+        <a-text id="vrResult" value="モデルを検索中..." align="center" width="1.8" wrap-count="35"
           position="0 -0.1 0.01"></a-text>
       </a-plane>
     </a-entity>
@@ -73,7 +74,7 @@
   </a-scene>
 
   <div id="overlay">
-    <button id="btn" onclick="takePhoto()">📷 解析スタート</button>
+    <button id="btn" onclick="takePhoto()" disabled>準備中...</button>
     <div id="log">起動中...</div>
     <video id="v" autoplay playsinline style="display:none"></video>
     <canvas id="c" style="display:none"></canvas>
@@ -85,6 +86,9 @@
     const vrResult = document.getElementById('vrResult');
     const v = document.getElementById('v');
     const c = document.getElementById('c');
+    const btn = document.getElementById('btn');
+
+    let targetModel = "";
 
     function print(msg, color = '') {
       const d = document.createElement('div');
@@ -94,28 +98,82 @@
       vrStatus.setAttribute('value', msg);
     }
 
-    window.onload = () => {
+    async function fetchAvailableModels(key) {
+      print("Geminiから使えるモデル一覧を取得中...");
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          print(`モデル取得エラー: APIキーが無効か、権限がありません (${res.status})`, "#f55");
+          if (data.error) print(`詳細: ${data.error.message}`, "#f55");
+          return false;
+        }
+
+        if (data.models && data.models.length > 0) {
+          const validModels = data.models
+            .filter(m => m.supportedGenerationMethods.includes('generateContent'))
+            .map(m => m.name.replace('models/', ''));
+
+          print(`利用可能モデル数: ${validModels.length}個`, "#0ff");
+
+          // flash または pro を優先して探す
+          const flash = validModels.find(m => m.includes('flash') && m.includes('1.5'));
+          const pro = validModels.find(m => m.includes('pro') && m.includes('1.5'));
+          const anyPro = validModels.find(m => m.includes('pro'));
+
+          targetModel = flash || pro || anyPro || validModels[0];
+
+          print(`✅ 最適なモデルを自動選択: ${targetModel}`, "#0f0");
+          vrResult.setAttribute('value', `使用モデル:\n${targetModel}\nスキャンを実行してください`);
+          return true;
+        } else {
+          print("利用可能なモデルが1つも見つかりません。", "#f55");
+          return false;
+        }
+      } catch (e) {
+        print(`モデル通信エラー: ${e.message}`, "#f55");
+        return false;
+      }
+    }
+
+    window.onload = async () => {
       if (typeof GEMINI_CONFIG === 'undefined') {
-        print("エラー: config.jsの読み込みを待機しています...", "#f55");
-        setTimeout(() => location.reload(), 2000);
+        print("config.jsが見つかりません。リロードしてください。", "#f55");
         return;
       }
-      print(`最新ビルド 確認成功 (${GEMINI_CONFIG.buildTime})`, "#0f0");
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-        .then(s => { v.srcObject = s; print("カメラ準備OK"); })
-        .catch(e => print("カメラエラー: " + e.message, "#f55"));
-    };
+      const key = GEMINI_CONFIG.apiKey.trim();
+      print(`ビルド確認: ${GEMINI_CONFIG.buildTime}`);
 
-    // 接続先候補リスト (404対策)
-    const API_VERSIONS = ['v1', 'v1beta'];
-    const MODELS = ['gemini-1.5-flash', 'gemini-1.5-flash-latest'];
+      // カメラ準備
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        v.srcObject = s;
+        print("カメラ準備OK");
+      } catch (e) {
+        print("カメラエラー: " + e.message, "#f55");
+      }
+
+      // モデル検索
+      const success = await fetchAvailableModels(key);
+      if (success) {
+        btn.innerText = `📷 スキャン (${targetModel.substring(0, 10)}...)`;
+        btn.disabled = false;
+      } else {
+        btn.innerText = "❌ 設定エラー";
+      }
+    };
 
     async function takePhoto() {
       if (document.body.classList.contains('processing')) return;
+      if (!targetModel) {
+        alert("モデルが見つかっていないため実行できません。");
+        return;
+      }
       document.body.classList.add('processing');
 
-      print("スキャン中...", "#fb0");
-      vrResult.setAttribute('value', "AIに接続しています...");
+      print(`解析中 (${targetModel})...`, "#fb0");
+      vrResult.setAttribute('value', "AIに画像を送信しています...");
 
       try {
         const ctx = c.getContext('2d');
@@ -124,41 +182,24 @@
         const base64 = c.toDataURL('image/jpeg', 0.8).split(',')[1];
         const key = GEMINI_CONFIG.apiKey.trim();
 
-        let lastError = "";
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${key}`;
 
-        // バージョンとモデルの組み合わせを全て試す (自己修復機能)
-        for (const ver of API_VERSIONS) {
-          for (const model of MODELS) {
-            try {
-              const apiUrl = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${key}`;
-              print(`${ver}/${model} で試行中...`);
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+          })
+        });
 
-              const res = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: "これ何？日本語1行で" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
-                })
-              });
-
-              const data = await res.json();
-              if (res.ok) {
-                print("解析成功！", "#0f0");
-                vrResult.setAttribute('value', data.candidates[0].content.parts[0].text);
-                document.body.classList.remove('processing');
-                return; // 成功したら終了
-              } else {
-                lastError = data.error ? data.error.message : "HTTP " + res.status;
-                if (lastError.includes("not found")) continue; // 次の候補へ
-                throw new Error(lastError);
-              }
-            } catch (e) {
-              lastError = e.message;
-              continue;
-            }
-          }
+        const data = await res.json();
+        if (res.ok) {
+          print("✅ 解析成功！", "#0f0");
+          vrResult.setAttribute('value', data.candidates[0].content.parts[0].text);
+        } else {
+          const errMsg = data.error ? data.error.message : "HTTP " + res.status;
+          throw new Error(errMsg);
         }
-        throw new Error("全モデルで試行しましたが失敗しました: " + lastError);
       } catch (e) {
         print("失敗: " + e.message, "#f55");
         vrResult.setAttribute('value', "エラー詳細:\n" + e.message);
