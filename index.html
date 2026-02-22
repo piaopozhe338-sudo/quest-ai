@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="utf-8">
-  <title>Quest AI Vision (Diagnosis)</title>
+  <title>Quest AI Vision (Build Verified)</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <style>
     #overlay {
@@ -25,7 +25,7 @@
       pointer-events: auto;
       border-radius: 50px;
       border: none;
-      background: #00f2fe;
+      background: #00ff88;
       color: black;
       font-weight: bold;
       cursor: pointer;
@@ -41,7 +41,10 @@
       max-height: 200px;
       overflow-y: auto;
       pointer-events: auto;
-      border: 1px solid #ff0055;
+    }
+
+    .ok {
+      color: #00ff88;
     }
 
     .err {
@@ -56,62 +59,58 @@
     xr-mode-ui="enabled: true; XRMode: ar" embedded>
     <a-entity id="uiContainer" position="0 1.5 -1.5">
       <a-plane color="#000" width="2" height="1.4" opacity="0.95">
-        <a-text id="debugPanelText" value="SYSTEM STARTING..." align="center" width="1.8" color="#00f2fe"></a-text>
+        <a-text id="debugPanelText" value="SYSTEM STARTING..." align="center" width="1.8" color="#00ff88"></a-text>
       </a-plane>
     </a-entity>
     <a-entity camera look-controls><a-entity geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
-        material="color: #00f2fe; shader: flat" position="0 0 -1"></a-entity></a-entity>
+        material="color: #00ff88; shader: flat" position="0 0 -1"></a-entity></a-entity>
   </a-scene>
 
   <div id="overlay">
-    <button id="captureBtn">スキャン実行</button>
+    <button id="captureBtn" onclick="scan()">スキャン実行</button>
     <div id="debugLog">Initializing...</div>
     <video id="video" autoplay playsinline style="display: none;"></video>
     <canvas id="canvas" style="display: none;"></canvas>
   </div>
 
   <script>
-    const VERSION = "v1.6-diagnosis";
     const GEMINI_API_KEY = '__API_KEY_PLACEHOLDER__';
-    const GEMINI_MODEL = 'gemini-1.5-flash';
+    const BUILD_TIME = '__BUILD_TIME_PLACEHOLDER__'; // Actionsがビルド時刻を入れます
 
     const debugLog = document.getElementById('debugLog');
     const debugPanelText = document.getElementById('debugPanelText');
     const video = document.getElementById('video');
     const canvas = document.getElementById('canvas');
 
-    function log(msg, isError = false) {
+    function log(msg, type = '') {
       const div = document.createElement('div');
-      if (isError) div.className = 'err';
+      if (type) div.className = type;
       div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
       debugLog.prepend(div);
       debugPanelText.setAttribute('value', msg + "\n" + debugPanelText.getAttribute('value').substring(0, 500));
     }
 
     async function init() {
-      log(`APP VERSION: ${VERSION}`);
+      log(`ビルド日時: ${BUILD_TIME}`);
 
       if (GEMINI_API_KEY === '__API_KEY_PLACEHOLDER__') {
-        log("【！重要エラー！】GitHub上のPages設定が間違っています。", true);
-        log("原因: 「Source」がまだ「Deploy from a branch」になっています。", true);
-        log("対策: Settings > Pages > Build and deployment > Source を 「GitHub Actions」 に切り替えてください。", true);
-      } else if (GEMINI_API_KEY === "") {
-        log("【！重要エラー！】APIキーが空です。GitHub Secrets に GEMINI_API_KEY を登録したか確認してください。", true);
+        log("【警告】古いページが表示されています（キャッシュ）", "err");
+        log("ブラウザのメニューから「履歴を削除」して再読み込みしてください。", "err");
       } else {
-        log("✅ APIキーの注入を確認成功: " + GEMINI_API_KEY.substring(0, 6) + "...");
-        log("これで作動するはずです！スキャンを押してください。");
+        log("✅ 最新版を確認！APIキー注入済み", "ok");
+        log("スキャンを押して開始してください。");
       }
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         video.srcObject = stream;
         log("カメラ準備完了");
-      } catch (e) { log("カメラ失敗: " + e.message, true); }
+      } catch (e) { log("カメラ失敗: " + e.message, "err"); }
     }
 
     async function scan() {
       if (document.body.classList.contains('scanning')) return;
-      if (GEMINI_API_KEY.startsWith('__')) { log("エラー: キーが注入されていないため通信できません。", true); return; }
+      if (GEMINI_API_KEY.startsWith('__')) { log("エラー: キーが有効ではありません。", "err"); return; }
 
       document.body.classList.add('scanning');
       log("--- 解析開始 ---");
@@ -123,34 +122,24 @@
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
-        // APIのURLを v1 に変更してテスト
-        const url = `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: "これ何？日本語で1行。" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+            contents: [{ parts: [{ text: "これは何？日本語で1行。" }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
           })
         });
 
         const data = await response.json();
-        log(`レスポンス: HTTP ${response.status}`);
+        if (!response.ok) throw new Error(data.error ? data.error.message : "APIエラー");
 
-        if (!response.ok) {
-          const msg = data.error ? data.error.message : "詳細不明";
-          throw new Error(`APIエラー(${response.status}): ${msg}`);
-        }
-
-        log("AIの回答: " + data.candidates[0].content.parts[0].text);
-      } catch (e) {
-        log("失敗: " + e.message, true);
-      } finally {
-        document.body.classList.remove('scanning');
-      }
+        log("✅ AIの回答: " + data.candidates[0].content.parts[0].text, "ok");
+      } catch (e) { log("失敗: " + e.message, "err"); }
+      finally { document.body.classList.remove('scanning'); }
     }
 
-    document.getElementById('captureBtn').addEventListener('click', scan);
-    document.addEventListener('DOMContentLoaded', init);
+    window.addEventListener('load', init);
   </script>
 </body>
 
