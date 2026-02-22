@@ -263,8 +263,7 @@
 
     // ====== 追加: 音声認識の初期設定 ======
     function initSpeechRecognition() {
-      if (recognition) return;
-
+      // 毎回作り直す（状態不整合を防ぐため）
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
         print("💡 音声認識非対応のブラウザです", "#f55");
@@ -274,12 +273,12 @@
       recognition = new SpeechRecognition();
       recognition.lang = 'ja-JP';
       recognition.interimResults = true;
-      recognition.continuous = false; // Questではfalseの方が安定する
+      recognition.continuous = true; // 長めの発話や間を許容する
       recognition.maxAlternatives = 1;
 
       recognition.onstart = function () {
         isRecording = true;
-        print("💡 録音中... (話しかけてください)", "#0f0");
+        print("💡 音声エンジン起動...", "#aaa");
         micBtn.innerHTML = '🛑 録音停止';
         micBtn.style.background = '#ff0000';
         vrResult.setAttribute('value', "録音中...");
@@ -290,27 +289,26 @@
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           transcript += event.results[i][0].transcript;
         }
-        recordedText = transcript;
-        vrResult.setAttribute('value', `🎤 認識中: ${recordedText}`);
-
-        if (event.results[event.results.length - 1].isFinal) {
-          print(`<b>🎤 確定: "${recordedText}"</b>`, "#0f0");
+        if (transcript) {
+          recordedText = transcript;
+          vrResult.setAttribute('value', `🎤: ${recordedText}`);
+          print(`🎤 認識中: "${recordedText}"`, "#0f0");
         }
       };
 
       recognition.onerror = function (event) {
-        print(`⚠️ エラー: ${event.error}`, "#f55");
-        if (event.error === 'aborted') {
-          print("👉 システムによる中断。もう一度ボタンを押し、ハッキリ喋ってください。", "#fb0");
-        }
+        print(`⚠️ マイクエラー: ${event.error}`, "#f55");
         resetMicBtn();
       };
 
+      recognition.onaudiostart = () => print("💡 音入力検知開始 (Microphone Active)", "#aaa");
+      recognition.onsoundstart = () => print("� 音を検知中...", "#aaa");
+      recognition.onspeechstart = () => print("💡 あなたの声を検知！", "#0f0");
+      recognition.onsoundend = () => print("💡 音入力検知終了 (Microphone Inactive)", "#aaa");
       recognition.onend = function () {
+        print(`💡 録音プロセスが終了しました`, "#aaa");
         resetMicBtn();
         let duration = Date.now() - recordStartTime;
-        print(`💡 終了 (約${Math.round(duration / 1000)}秒)`, "#aaa");
-
         if (tempImageBase64) {
           vrResult.setAttribute('value', "解析中...");
           sendToAI(tempImageBase64);
@@ -335,31 +333,20 @@
       if (isProcessing) return;
       isProcessing = true;
 
-      if (!recognition) {
-        initSpeechRecognition();
-        if (!recognition) {
-          isProcessing = false;
-          return;
-        }
-      }
+      // 毎回新しく作る
+      recognition = null;
+      initSpeechRecognition();
 
       try {
         if (isRecording) {
-          print("💡 録音を停止します...", "#aaa");
+          print("💡 停止命令を送ります...", "#aaa");
           recognition.stop();
         } else {
           recordedText = "";
           tempImageBase64 = "";
           recordStartTime = Date.now();
 
-          // すでに動いている可能性を考慮して一度強制終了
-          try { recognition.abort(); } catch (e) { }
-
-          // UIを即座に「起動準備中」風にする
-          micBtn.innerHTML = '⌛ 準備中...';
-          micBtn.style.background = '#888';
-
-          // ユーザージェスチャから直接起動
+          // ユーザージェスチャから速攻で起動
           recognition.start();
           tempImageBase64 = captureVRImage();
         }
@@ -468,7 +455,7 @@
       wakeupSpeech(); // ページロード時にもウォームアップ
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
-        print(`ビルド: 2026-02-23 03:25 (Safe State v7)`);
+        print(`ビルド: 2026-02-23 03:35 (Voice Debug v8)`);
         const success = await fetchAvailableModels(GEMINI_CONFIG.apiKey.trim());
         if (success) btn.disabled = false;
       }
