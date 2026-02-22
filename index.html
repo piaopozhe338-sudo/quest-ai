@@ -262,9 +262,13 @@
     function initSpeechRecognition() {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        print("このブラウザは音声認識に非対応です", "#f55");
-        micBtn.style.display = 'none';
+        print("💡 音声認識非対応のブラウザです", "#f55");
         return;
+      }
+
+      // 既存のインスタンスがあれば停止して破棄
+      if (recognition) {
+        try { recognition.stop(); } catch (e) { }
       }
 
       recognition = new SpeechRecognition();
@@ -276,6 +280,7 @@
       recognition.onstart = function () {
         // UI更新は toggleMic 側で即座に行うため、ここは状態フラグの確実なセットのみ
         isRecording = true;
+        print("💡 音声認識エンジンが起動しました", "#aaa");
       };
 
       recognition.onresult = function (event) {
@@ -288,44 +293,47 @@
       };
 
       recognition.onerror = function (event) {
-        print(`マイクエラー: ${event.error}`, "#f55");
+        print(`⚠️ マイクエラー: ${event.error}`, "#f55");
+        if (event.error === 'not-allowed') {
+          print("👉 Questの設定でこのサイトのマイクを「許可」にしてください", "#f55");
+        }
         resetMicBtn();
       };
 
       // ====== 追加: デバッグおよび状態把握用のイベント ======
       recognition.onaudiostart = function () {
-        print("💡 マイクの音声入力を検知開始...", "#aaa");
+        print("💡 マイクが音を拾い始めました", "#aaa");
       };
 
       recognition.onsoundstart = function () {
-        print("💡 何らかの音を検知しました", "#aaa");
+        print("💡 音（ノイズ含む）を検知", "#aaa");
       };
 
       recognition.onspeechstart = function () {
-        print("💡 ユーザーの発話を検知しました！", "#aaa");
+        print("💡 あなたの声を検知！", "#0f0");
       };
 
       recognition.onnomatch = function () {
-        print("⚠️ 音声は拾いましたが、言葉として認識できませんでした", "#fb0");
+        print("⚠️ 言葉として聞き取れませんでした", "#fb0");
       };
 
       recognition.onend = function () {
         resetMicBtn();
         let duration = Date.now() - recordStartTime;
-        print(`💡 録音終了 (録音時間: ${Math.round(duration / 1000)}秒)`, "#aaa");
+        print(`💡 録音終了 (約${Math.round(duration / 1000)}秒)`, "#aaa");
 
         if (recordedText && tempImageBase64) {
-          vrResult.setAttribute('value', "質問と画像を送信中...");
-          print(`🎤 送信した質問: "${recordedText}"`, "#0f0");
+          vrResult.setAttribute('value', "解析中...");
+          print(`🎤 送信: "${recordedText}"`, "#0f0");
           sendToAI(tempImageBase64); // 自動で送信
         } else if (recordedText) {
-          vrResult.setAttribute('value', "質問を受付済。写真を選択してください");
-          print(`🎤 確定した質問: "${recordedText}"`, "#0f0");
+          vrResult.setAttribute('value', "質問受付。写真待ち...");
+          print(`🎤 確定: "${recordedText}"`, "#0f0");
           // 停止時にもう一度ログに出してあげる
-          print(`👉 次に写真を送ると「${recordedText}」への回答が来ます`, "#0ff");
+          print(`👉 このまま「写真を選択」で送信されます`, "#0ff");
         } else {
-          print(`⚠️ 音声入力が空でした。Questのマイクの設定（ミュート等）を確認してください。`, "#fb0");
-          vrResult.setAttribute('value', "音声入力なし");
+          print(`⚠️ 内容が空でした。マイク許可と音量を確認してください。`, "#fb0");
+          vrResult.setAttribute('value', "入力なし");
         }
       };
     }
@@ -339,34 +347,46 @@
     }
 
     async function toggleMic() {
-      if (!recognition) return;
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
       if (isRecording) {
         // 即座にUIを戻して停止命令を出す
         resetMicBtn();
-        recognition.stop();
+        if (recognition) recognition.stop();
       } else {
         recordedText = "";
         tempImageBase64 = ""; // リセット
+
+        // クエストブラウザのマイク権限を明示的に要求/確認する
+        try {
+          print("💡 マイク権限を確認中...", "#aaa");
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+          print("⚠️ マイク権限エラー: 「許可」してください", "#f55");
+          return;
+        }
+
+        initSpeechRecognition(); // 毎回クリーンなインスタンスを作る
 
         // UIを即座に「録音中」に切り替える（APIの起動ラグを隠すため）
         isRecording = true;
         micBtn.innerHTML = '🛑 録音停止 (発話中...)';
         micBtn.style.background = '#ff0000';
-        print("マイク録音中... 話しかけてください", "#0f0");
-        vrResult.setAttribute('value', "録音中... (終わったら停止ボタン)");
+        print("🎤 録音開始! 喋ってください", "#0f0");
+        vrResult.setAttribute('value', "録音中... (終わったら停止)");
 
         // 裏でこっそりVRキャプチャを撮っておく
         tempImageBase64 = captureVRImage();
 
         if (!tempImageBase64) {
-          print("⚠️ VRキャプチャ制限中: 音声のみ記録します。しゃべり終わったら「写真を選択」してください。", "#fb0");
+          print("⚠️ VR画像取得不可 (音声のみ記録)", "#fb0");
         }
 
         recordStartTime = Date.now();
         try {
           recognition.start();
         } catch (e) {
-          print(`⚠️ 録音開始エラー: ${e.message}`, "#f55");
+          print(`⚠️ 録音エラー: ${e.message}`, "#f55");
           resetMicBtn();
         }
       }
@@ -452,7 +472,7 @@
       initSpeechRecognition(); // 音声認識の初期化
 
       if (typeof GEMINI_CONFIG !== 'undefined') {
-        print(`ビルド: ${GEMINI_CONFIG.buildTime}`);
+        print(`ビルド: 2026-02-23 02:50 (Diagnostic v4)`);
         const success = await fetchAvailableModels(GEMINI_CONFIG.apiKey.trim());
         if (success) btn.disabled = false;
       }
