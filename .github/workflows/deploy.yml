@@ -24,19 +24,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inject Data
-        env:
-          MY_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Create Config File
         run: |
-          # 日時を取得（日本時間にする場合は TZ=Asia/Tokyo date ...）
-          DEPLOY_TIME=$(date +'%Y-%m-%d %H:%M:%S')
-          echo "Deploy Time: ${DEPLOY_TIME}"
-          
-          # APIキーと時間を書き換え
-          sed -i "s|__API_KEY_PLACEHOLDER__|${MY_API_KEY}|g" index.html
-          sed -i "s|__BUILD_TIME_PLACEHOLDER__|${DEPLOY_TIME}|g" index.html
-          
-          echo "Injection successful."
+          # config.js を新規作成し、そこにAPIキーを書き込みます
+          # これにより、index.html の書き換え失敗という問題がなくなります
+          echo "window.GEMINI_CONFIG = {" > config.js
+          echo "  apiKey: '${{ secrets.GEMINI_API_KEY }}'," >> config.js
+          echo "  buildTime: '$(date +'%Y-%m-%d %H:%M:%S')'" >> config.js
+          echo "};" >> config.js
+          echo "config.js created contents:"
+          cat config.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
