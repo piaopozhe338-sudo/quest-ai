@@ -226,6 +226,7 @@
     const fileInput = document.getElementById('fileInput');
 
     let targetModel = "";
+    let availableModels = []; // 追加: フォールバック用のモデル一覧
     let sceneEl = null;
 
     function print(msg, color = '') {
@@ -241,9 +242,11 @@
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
         const data = await res.json();
         if (data.models) {
-          const valid = data.models.filter(m => m.supportedGenerationMethods.includes('generateContent')).map(m => m.name.replace('models/', ''));
-          targetModel = valid.find(m => m.includes('flash')) || valid[0];
-          print(`モデル準備完了: ${targetModel}`, "#0f0");
+          let valid = data.models.filter(m => m.supportedGenerationMethods.includes('generateContent')).map(m => m.name.replace('models/', ''));
+          // 安定・無料枠優先しつつ新しい順にするため、flashモデルのみを抽出し、名前降順（2.5 -> 1.5 -> 1.0）にする
+          valid = valid.filter(m => m.includes('flash')).sort().reverse();
+          availableModels = valid.length > 0 ? valid : targetModel ? [targetModel] : ["gemini-1.5-flash"];
+          print(`モデル準備完了: ${availableModels.length}種類`, "#0f0");
           return true;
         }
       } catch (e) { print("モデル取得失敗", "#f55"); }
@@ -289,11 +292,10 @@
       if (document.body.classList.contains('processing')) return;
       document.body.classList.add('processing');
 
-      print("AI送信中...");
+      print("AI送信中 (複数モデルで試行)...");
       vrResult.setAttribute('value', "AIに接続しています...");
 
-      try {
-        const promptText = `
+      const promptText = `
 あなたは優秀な画像解析アシスタントです。ユーザーがアップロードした画像を見て、写っているメインの物体・商品（複数でも可）を特定してください。
 以下の厳密なJSON形式で出力してください。Markdownのコードブロック構文(\`\`\`json)等は一切含めず、純粋なJSON文字列だけを返してください。
 
@@ -311,81 +313,96 @@
 ※商品がない場合や特定不能な場合は "products": [] としてください。
 `;
 
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${GEMINI_CONFIG.apiKey.trim()}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            // 安定のため、systemInstructionではなく通常のプロンプトとして送信
-            contents: [{ parts: [{ text: promptText }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
-          })
-        });
+      let anySuccess = false;
 
-        const data = await res.json();
-        if (res.ok) {
-          const replyText = data.candidates[0].content.parts[0].text.trim();
+      // 新しいモデル（配列の先頭）ら順に試行
+      for (let i = 0; i < availableModels.length; i++) {
+        const currentModel = availableModels[i];
+        try {
+          // print(`${currentModel} で試行中...`); // 詳細を出さないようにとの要望なので表示しない
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${GEMINI_CONFIG.apiKey.trim()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: promptText }, { inlineData: { mimeType: "image/jpeg", data: base64 } }] }]
+            })
+          });
 
-          let aiResult = {};
-          try {
-            // もしGeminiがMarkdownブロックで囲んできたら除去
-            const cleanedText = replyText.replace(/```json/gi, '').replace(/```/g, '').trim();
-            aiResult = JSON.parse(cleanedText);
-          } catch (e) {
-            console.error("JSONパースエラー:", e, "生データ:", replyText);
-            // パース失敗時のフォールバック
-            aiResult = {
-              description: replyText,
-              products: []
-            };
-          }
+          const data = await res.json();
+          if (res.ok) {
+            const replyText = data.candidates[0].content.parts[0].text.trim();
 
-          print("解析完了！回答を表示します。", "#0f0");
-          print(`💬 ${aiResult.description.substring(0, 20)}...`, "#0f0");
+            let aiResult = {};
+            try {
+              const cleanedText = replyText.replace(/```json/gi, '').replace(/```/g, '').trim();
+              aiResult = JSON.parse(cleanedText);
+            } catch (e) {
+              console.error("JSONパースエラー:", e, "生データ:", replyText);
+              aiResult = { description: replyText, products: [] };
+            }
 
-          answerBox.style.display = 'block';
+            print("解析完了！回答を表示します。", "#0f0");
+            print(`💬 ${aiResult.description.substring(0, 20)}...`, "#0f0");
 
-          let htmlContent = `<strong>【AIの解析結果】</strong><br><br>${aiResult.description.replace(/\\n/g, '<br>')}`;
+            answerBox.style.display = 'block';
 
-          if (aiResult.products && aiResult.products.length > 0) {
-            htmlContent += `
-              <hr style="border-color:#555; margin: 15px 0;">
-              <strong>🛒 認識された商品 (${aiResult.products.length}点):</strong>
-              <div class="product-list">
-            `;
+            let htmlContent = `<strong>【AIの解析結果 (${currentModel.replace("-flash", "")})】</strong><br><br>${aiResult.description.replace(/\\n/g, '<br>')}`;
 
-            aiResult.products.forEach(prod => {
-              if (!prod.name) return;
-              const encodedName = encodeURIComponent(prod.name);
-              const amazonUrl = `https://www.amazon.co.jp/s?k=${encodedName}`;
-              const rakutenUrl = `https://search.rakuten.co.jp/search/mall/${encodedName}/`;
-
+            if (aiResult.products && aiResult.products.length > 0) {
               htmlContent += `
-                  <div class="product-info">
-                    <div style="font-size: 1.1em; color: #0f0; margin-bottom: 5px;">${prod.name}</div>
-                    <div class="product-img-placeholder">📦</div>
-                    <div class="shop-links">
-                      <a href="${amazonUrl}" target="_blank" class="shop-btn btn-amazon">Amazonで探す</a>
-                      <a href="${rakutenUrl}" target="_blank" class="shop-btn btn-rakuten">楽天で探す</a>
+                <hr style="border-color:#555; margin: 15px 0;">
+                <strong>🛒 認識された商品 (${aiResult.products.length}点):</strong>
+                <div class="product-list">
+              `;
+
+              aiResult.products.forEach(prod => {
+                if (!prod.name) return;
+                const encodedName = encodeURIComponent(prod.name);
+                const amazonUrl = `https://www.amazon.co.jp/s?k=${encodedName}`;
+                const rakutenUrl = `https://search.rakuten.co.jp/search/mall/${encodedName}/`;
+
+                htmlContent += `
+                    <div class="product-info">
+                      <div style="font-size: 1.1em; color: #0f0; margin-bottom: 5px;">${prod.name}</div>
+                      <div class="product-img-placeholder">📦</div>
+                      <div class="shop-links">
+                        <a href="${amazonUrl}" target="_blank" class="shop-btn btn-amazon">Amazonで探す</a>
+                        <a href="${rakutenUrl}" target="_blank" class="shop-btn btn-rakuten">楽天で探す</a>
+                      </div>
                     </div>
-                  </div>
-                `;
-            });
+                  `;
+              });
 
-            htmlContent += `</div>`;
+              htmlContent += `</div>`;
+            }
+
+            answerBox.innerHTML = htmlContent;
+
+            vrStatus.setAttribute('value', "AIの解析結果");
+            vrResult.setAttribute('value', "(画面の回答をご覧ください)");
+
+            anySuccess = true;
+            break; // 成功したためループを抜ける
+          } else {
+            // エラーの場合、次のモデルへ
+            let errMessage = data.error && data.error.message ? data.error.message : "APIエラー";
+            if (errMessage.includes("Quota") || res.status === 429) {
+              print(`${currentModel}: レート制限不可`, "#fb0");
+            } else {
+              print(`${currentModel}: 使用不可`, "#fb0");
+            }
           }
-
-          answerBox.innerHTML = htmlContent;
-
-          vrStatus.setAttribute('value', "AIの解析結果");
-          vrResult.setAttribute('value', "(画面の回答をご覧ください)");
-        } else {
-          throw new Error(data.error ? data.error.message : "APIエラー");
+        } catch (e) {
+          print(`${currentModel}: 通信不可`, "#fb0");
         }
-      } catch (e) {
-        print("失敗: " + e.message, "#f55");
-        vrResult.setAttribute('value', "エラー: " + e.message);
-      } finally {
-        document.body.classList.remove('processing');
       }
+
+      if (!anySuccess) {
+        print("全モデルで制限かエラー。時間をおいてね。", "#f55");
+        vrResult.setAttribute('value', "エラー: 全モデル使用不可");
+      }
+
+      document.body.classList.remove('processing');
     }
 
     // ====== VRキャプチャ処理 (制限あり) ======
