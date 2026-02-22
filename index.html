@@ -3,15 +3,18 @@
 
 <head>
   <meta charset="utf-8">
-  <title>Quest AI Vision (Final Stable)</title>
-  <!-- 強力なキャッシュ回避設定 -->
+  <title>Quest AI Vision (Ultimate)</title>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <!-- GitHub Actions が生成する設定ファイルを読み込みます -->
-  <script src="config.js"></script>
+
+  <!-- キャッシュを強制回避して設定ファイルを読み込む -->
+  <script>
+    (function () {
+      const script = document.createElement('script');
+      script.src = 'config.js?t=' + Date.now();
+      document.head.appendChild(script);
+    })();
+  </script>
 
   <style>
     #overlay {
@@ -33,14 +36,15 @@
       pointer-events: auto;
       border-radius: 50px;
       border: none;
-      background: #fbda61;
-      color: black;
+      background: #a29bfe;
+      color: white;
       font-weight: bold;
       cursor: pointer;
+      border: 2px solid white;
     }
 
     #debugLog {
-      background: rgba(0, 0, 0, 0.95);
+      background: rgba(45, 52, 54, 0.95);
       padding: 15px;
       border-radius: 10px;
       margin-top: 10px;
@@ -49,36 +53,36 @@
       max-height: 200px;
       overflow-y: auto;
       pointer-events: auto;
-      border: 1px solid #fbda61;
+      border: 1px solid #a29bfe;
     }
 
     .ok {
-      color: #fbda61;
+      color: #55efc4;
       font-weight: bold;
     }
 
     .err {
-      color: #ff0055;
+      color: #ff7675;
       font-weight: bold;
     }
   </style>
 </head>
 
-<body>
+<body style="background: #2d3436;">
   <a-scene webxr="optionalFeatures: hit-test, local-floor, dom-overlay, layers; overlayElement: #overlay;"
     xr-mode-ui="enabled: true; XRMode: ar" embedded>
     <a-entity id="uiContainer" position="0 1.5 -1.2">
-      <a-plane color="#000" width="2" height="1.4" opacity="0.95">
-        <a-text id="debugPanelText" value="SYSTEM READY" align="center" width="1.8" color="#fbda61"></a-text>
+      <a-plane color="#2d3436" width="2" height="1.4" opacity="0.95">
+        <a-text id="debugPanelText" value="ULTIMATE VERSION LOADED" align="center" width="1.8" color="#a29bfe"></a-text>
       </a-plane>
     </a-entity>
     <a-entity camera look-controls><a-entity geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
-        material="color: #fbda61; shader: flat" position="0 0 -1"></a-entity></a-entity>
+        material="color: #a29bfe; shader: flat" position="0 0 -1"></a-entity></a-entity>
   </a-scene>
 
   <div id="overlay">
-    <button id="captureBtn" onclick="scan()">スキャン開始</button>
-    <div id="debugLog">System initializing...</div>
+    <button id="captureBtn" onclick="scan()">スキャン開始(ULTIMATE)</button>
+    <div id="debugLog">Checking config...</div>
     <video id="video" autoplay playsinline style="display: none;"></video>
     <canvas id="canvas" style="display: none;"></canvas>
   </div>
@@ -97,34 +101,32 @@
       debugPanelText.setAttribute('value', msg + "\n" + debugPanelText.getAttribute('value').substring(0, 300));
     }
 
-    function init() {
-      // config.js (window.GEMINI_CONFIG) が存在するかチェック
+    // 設定ファイルが読み込まれるのを待って初期化
+    function checkConfig() {
       if (typeof window.GEMINI_CONFIG === 'undefined') {
-        log("【！警告！】設定ファイル(config.js)が見つかりません。", "err");
-        log("原因: デプロイ直後で反映されていないか、Actionsの設定ミスです。", "err");
+        setTimeout(checkConfig, 500);
         return;
       }
-
       const { apiKey, buildTime } = window.GEMINI_CONFIG;
       log(`ビルド日時: ${buildTime}`);
-
-      if (!apiKey || apiKey === '' || apiKey.startsWith('__')) {
-        log("【！警告！】APIキーが読み込めませんでした。", "err");
-        log("GitHub Secrets(GEMINI_API_KEY)を確認してください。", "err");
+      if (!apiKey || apiKey === '') {
+        log("【！警告！】APIキーが空です。Secretsを確認してください。", "err");
       } else {
-        log("✅ 成功！最新の設定を読み込みました。", "ok");
-        log("スキャンを開始できます。");
+        log("✅ 成功！最新のAPIキーを認識しました。", "ok");
       }
+    }
 
+    window.addEventListener('load', () => {
+      checkConfig();
       navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
         .then(s => { video.srcObject = s; log("カメラ準備完了"); })
         .catch(e => log("カメラ失敗: " + e.message, "err"));
-    }
+    });
 
     async function scan() {
       if (document.body.classList.contains('scanning')) return;
       if (!window.GEMINI_CONFIG || !window.GEMINI_CONFIG.apiKey) {
-        alert("設定が正しく読み込まれていません。リロードしてください。");
+        alert("設定が読み込まれていません。1〜2秒待ってから再試行してください。");
         return;
       }
 
@@ -138,8 +140,11 @@
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
-        // v1beta で 404 が出たため、安定版の v1 エンドポイントを使用
-        const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${window.GEMINI_CONFIG.apiKey}`;
+        // API URLの修正: モデル名を gemini-1.5-flash に固定。末尾の余計な文字を排除するため trim() を使用
+        const cleanKey = window.GEMINI_CONFIG.apiKey.trim();
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanKey}`;
+
+        log("API送信中 (v1beta)...");
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -149,13 +154,16 @@
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error ? data.error.message : "APIエラー");
+        if (!response.ok) throw new Error(data.error ? data.error.message : "APIエラー " + response.status);
         log("✅ AI回答: " + data.candidates[0].content.parts[0].text, "ok");
-      } catch (e) { log("失敗: " + e.message, "err"); }
+      } catch (e) {
+        log("失敗: " + e.message, "err");
+        if (e.message.includes("404")) {
+          log("ヒント: モデル名またはAPIキーの権限に問題がある可能性があります。", "err");
+        }
+      }
       finally { document.body.classList.remove('scanning'); }
     }
-
-    window.addEventListener('load', init);
   </script>
 </body>
 
