@@ -269,7 +269,8 @@
 
       recognition = new SpeechRecognition();
       recognition.lang = 'ja-JP';
-      recognition.interimResults = false; // 確定した結果のみ取得
+      // 追加: 途中結果（interimResults）を有効にしてQuestブラウザ特有のラグや停止時の破棄を防ぐ
+      recognition.interimResults = true;
       recognition.maxAlternatives = 1;
 
       recognition.onstart = function () {
@@ -278,8 +279,12 @@
       };
 
       recognition.onresult = function (event) {
-        recordedText = event.results[0][0].transcript;
-        print(`🎤 認識した質問: "${recordedText}"`, "#0f0"); // パネルに表示
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          transcript += event.results[i][0].transcript;
+        }
+        recordedText = transcript;
+        vrResult.setAttribute('value', `🎤 認識中: ${recordedText}`);
       };
 
       recognition.onerror = function (event) {
@@ -291,11 +296,16 @@
         resetMicBtn();
         if (recordedText && tempImageBase64) {
           vrResult.setAttribute('value', "質問と画像を送信中...");
+          print(`🎤 送信した質問: "${recordedText}"`, "#0f0");
           sendToAI(tempImageBase64); // 自動で送信
         } else if (recordedText) {
           vrResult.setAttribute('value', "質問を受付済。写真を選択してください");
+          print(`🎤 確定した質問: "${recordedText}"`, "#0f0");
           // 停止時にもう一度ログに出してあげる
           print(`👉 次に写真を送ると「${recordedText}」への回答が来ます`, "#0ff");
+        } else {
+          print("音声が認識されませんでした。もう一度試すか、写真を選択してください。", "#fb0");
+          vrResult.setAttribute('value', "音声入力なし");
         }
       };
     }
